@@ -21,8 +21,6 @@ pub fn build(b: *std.Build) void {
     exe.addCSourceFile(.{ .file = b.path("src/c/stb_image.c"), .language = .c });
     exe.addIncludePath(b.path("src/c/"));
 
-    //exe.linkSystemLibrary("SDL3_image");
-
     build_shaders(b, exe) catch unreachable;
 
     b.installArtifact(exe);
@@ -64,8 +62,6 @@ fn build_shaders(b: *std.Build, exe: *std.Build.Step.Compile) !void {
         if (!std.mem.endsWith(u8, entry.basename, ".glsl")) {
             continue;
         }
-
-        //std.debug.print("-- {s}\n", .{entry.basename});
 
         const name_no_ext = entry.basename[0 .. entry.basename.len - ".glsl".len];
 

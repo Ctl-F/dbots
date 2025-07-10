@@ -208,3 +208,10 @@ pub fn main() !void {
 }
 
 // TODO: Bulk staging buffer uploading (single copyPass)
+// TODO: multi-thread asset loading
+// TODO: Input abstraction
+// TODO: Projection/lookat caclulations
+// TODO: Mesh asset type
+// TODO: Sound asset type
+// TODO: Level Layout asset type
+// TODO: Collisions
