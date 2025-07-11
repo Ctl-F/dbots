@@ -6,6 +6,8 @@ const std = @import("std");
 const builtin = @import("builtin");
 const assets = @import("assets.zig");
 
+pub const Input = @import("input.zig");
+
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 
 pub const MemAlloc = switch (builtin.mode) {
@@ -17,6 +19,7 @@ pub const MemAlloc = switch (builtin.mode) {
 
 var windowptr: ?*sdl.SDL_Window = null;
 var gpu_device: ?*sdl.SDL_GPUDevice = null;
+var _input: ?Input = null;
 
 pub fn device() *sdl.SDL_GPUDevice {
     if (gpu_device) |dev| {
@@ -32,6 +35,18 @@ pub fn window() *sdl.SDL_Window {
     } else {
         unreachable;
     }
+}
+
+pub fn input_mode(mode: Input.Mode) void {
+    _input = Input.init(mode);
+}
+
+pub fn input() *Input {
+    if (_input) |*inp| {
+        return inp;
+    }
+    std.debug.print("Input mode not set\n", .{});
+    unreachable;
 }
 
 pub const InitOptions = struct {

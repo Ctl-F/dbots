@@ -1,6 +1,7 @@
 const std = @import("std");
 const host = @import("host.zig");
 const assets = @import("assets.zig");
+const math = @import("math.zig");
 
 const Vertex = extern struct {
     x: f32,
@@ -41,22 +42,32 @@ fn upload_sprite(sprite: assets.SoftwareTexture) !host.GPUTexture {
 }
 
 fn get_triangle_buffer(format: host.VertexFormat) !host.GPUBuffer {
+    // const triangle = [_]Vertex{
+    //     .{ .x = -0.75, .y = -0.75, .z = 0, .r = 0.3, .g = 0, .b = 0.3, .u = 0.0, .v = 0.0 },
+    //     .{ .x = 0.75, .y = -0.75, .z = 0, .r = 0.3, .g = 0, .b = 0.3, .u = 1.0, .v = 0.0 },
+    //     .{ .x = -0.75, .y = 0, .z = 0, .r = 0, .g = 0, .b = 0.3, .u = 0.0, .v = 1.0 },
+
+    //     .{ .x = -0.75, .y = 0, .z = 0, .r = 0, .g = 0, .b = 0.3, .u = 0.0, .v = 1.0 },
+    //     .{ .x = 0.75, .y = 0, .z = 0, .r = 0, .g = 0, .b = 0.3, .u = 1.0, .v = 1.0 },
+    //     .{ .x = 0.75, .y = -0.75, .z = 0, .r = 0.3, .g = 0, .b = 0.3, .u = 1.0, .v = 0.0 },
+
+    //     .{ .x = -0.75, .y = 0.75, .z = 0, .r = 0, .g = 0.3, .b = 0.2, .u = 0.0, .v = 0.0 },
+    //     .{ .x = 0.75, .y = 0.75, .z = 0, .r = 0, .g = 0.3, .b = 0.2, .u = 0.0, .v = 0.0 },
+    //     .{ .x = -0.75, .y = 0, .z = 0, .r = 0, .g = 0, .b = 0.3, .u = 0.0, .v = 0.0 },
+
+    //     .{ .x = -0.75, .y = 0, .z = 0, .r = 0, .g = 0, .b = 0.3, .u = 0.0, .v = 0.0 },
+    //     .{ .x = 0.75, .y = 0.75, .z = 0, .r = 0, .g = 0.3, .b = 0.2, .u = 0.0, .v = 0.0 },
+    //     .{ .x = 0.75, .y = 0, .z = 0, .r = 0, .g = 0, .b = 0.3, .u = 0.0, .v = 0.0 },
+    // };
+
     const triangle = [_]Vertex{
-        .{ .x = -0.75, .y = -0.75, .z = 0, .r = 0.3, .g = 0, .b = 0.3, .u = 0.0, .v = 0.0 },
-        .{ .x = 0.75, .y = -0.75, .z = 0, .r = 0.3, .g = 0, .b = 0.3, .u = 1.0, .v = 0.0 },
-        .{ .x = -0.75, .y = 0, .z = 0, .r = 0, .g = 0, .b = 0.3, .u = 0.0, .v = 1.0 },
+        .{ .x = -3.0, .y = 0.0, .z = -3.0, .r = 1.0, .g = 1.0, .b = 1.0, .u = 0.0, .v = 0.0 },
+        .{ .x = 3.0, .y = 0.0, .z = -3.0, .r = 1.0, .g = 1.0, .b = 1.0, .u = 1.0, .v = 0.0 },
+        .{ .x = -3.0, .y = 0.0, .z = 3.0, .r = 1.0, .g = 1.0, .b = 1.0, .u = 0.0, .v = 1.0 },
 
-        .{ .x = -0.75, .y = 0, .z = 0, .r = 0, .g = 0, .b = 0.3, .u = 0.0, .v = 1.0 },
-        .{ .x = 0.75, .y = 0, .z = 0, .r = 0, .g = 0, .b = 0.3, .u = 1.0, .v = 1.0 },
-        .{ .x = 0.75, .y = -0.75, .z = 0, .r = 0.3, .g = 0, .b = 0.3, .u = 1.0, .v = 0.0 },
-
-        .{ .x = -0.75, .y = 0.75, .z = 0, .r = 0, .g = 0.3, .b = 0.2, .u = 0.0, .v = 0.0 },
-        .{ .x = 0.75, .y = 0.75, .z = 0, .r = 0, .g = 0.3, .b = 0.2, .u = 0.0, .v = 0.0 },
-        .{ .x = -0.75, .y = 0, .z = 0, .r = 0, .g = 0, .b = 0.3, .u = 0.0, .v = 0.0 },
-
-        .{ .x = -0.75, .y = 0, .z = 0, .r = 0, .g = 0, .b = 0.3, .u = 0.0, .v = 0.0 },
-        .{ .x = 0.75, .y = 0.75, .z = 0, .r = 0, .g = 0.3, .b = 0.2, .u = 0.0, .v = 0.0 },
-        .{ .x = 0.75, .y = 0, .z = 0, .r = 0, .g = 0, .b = 0.3, .u = 0.0, .v = 0.0 },
+        .{ .x = -3.0, .y = 0.0, .z = 3.0, .r = 1.0, .g = 1.0, .b = 1.0, .u = 0.0, .v = 1.0 },
+        .{ .x = 3.0, .y = 0.0, .z = -3.0, .r = 1.0, .g = 1.0, .b = 1.0, .u = 1.0, .v = 0.0 },
+        .{ .x = 3.0, .y = 0.0, .z = 3.0, .r = 1.0, .g = 1.0, .b = 1.0, .u = 1.0, .v = 1.0 },
     };
 
     var stagingInfo = try host.begin_stage_buffer(host.BufferCreateInfo{
@@ -76,6 +87,12 @@ fn get_triangle_buffer(format: host.VertexFormat) !host.GPUBuffer {
 
 const UniformColor = extern struct {
     color: [4]f32,
+};
+
+const UniformTransform = extern struct {
+    projection: math.mat4,
+    view: math.mat4,
+    model: math.mat4,
 };
 
 pub fn main() !void {
@@ -104,7 +121,7 @@ pub fn main() !void {
                         .sampler_count = 0,
                         .storage_buffer_count = 0,
                         .storage_texture_count = 0,
-                        .uniform_buffer_count = 0,
+                        .uniform_buffer_count = 1,
                     },
                 },
             },
@@ -164,43 +181,33 @@ pub fn main() !void {
     std.debug.print("Starting main loop\n", .{});
 
     var color: UniformColor = .{ .color = @splat(1) };
+    var transform: UniformTransform = .{
+        .projection = math.mat4_build_perspective(90.0, @as(f32, @floatFromInt(options.display.width)) / @as(f32, @floatFromInt(options.display.height)), 0.01, 100.0),
+        .view = math.mat4_build_lookat(.{ 0, 1, 3 }, .{ 0, 0, 0 }, .{ 0, 1, 0 }),
+        .model = math.mat4_build_ident(),
+    };
 
-    app: while (true) {
-        var event: host.sdl.SDL_Event = undefined;
-        while (host.sdl.SDL_PollEvent(&event)) {
-            switch (event.type) {
-                host.sdl.SDL_EVENT_QUIT => break :app,
-                host.sdl.SDL_EVENT_KEY_DOWN => {
-                    if (event.key.scancode == host.sdl.SDL_SCANCODE_ESCAPE) {
-                        break :app;
-                    }
+    host.input_mode(.Keyboard);
+    var input = host.input();
 
-                    const debug_print = A: {
-                        if (event.key.scancode == host.sdl.SDL_SCANCODE_1) {
-                            color.color[0] = 1.0 - color.color[0];
-                            break :A true;
-                        } else if (event.key.scancode == host.sdl.SDL_SCANCODE_2) {
-                            color.color[1] = 1.0 - color.color[1];
-                            break :A true;
-                        } else if (event.key.scancode == host.sdl.SDL_SCANCODE_3) {
-                            color.color[2] = 1.0 - color.color[2];
-                            break :A true;
-                        }
+    var angle_x: f32 = 0;
+    var angle_y: f32 = 0;
 
-                        break :A false;
-                    };
+    app: while (!input.should_close()) {
+        input.process_events();
 
-                    if (debug_print) {
-                        std.debug.print("{},{},{}\n", .{ color.color[0], color.color[1], color.color[2] });
-                    }
-                },
+        angle_y += input.mouse_x_rel * 0.01;
+        angle_x -= input.mouse_y_rel * 0.01;
 
-                else => {},
-            }
+        transform.view = math.mat4_build_lookat(.{ 0, 1, 3 }, .{ 0, 0, 0 }, .{ 0, 1, 0 });
+
+        if (input.action_just_pressed(.Pause)) {
+            break :app;
         }
 
         var renderPass = try pipeline.begin(.{ 0.0, 0.0, 0.0, 1.0 });
         pipeline.bind_uniform_buffer(renderPass, &color, @sizeOf(UniformColor), .Fragment, 0);
+        pipeline.bind_uniform_buffer(renderPass, &transform, @sizeOf(UniformTransform), .Vertex, 0);
         try pipeline.bind_texture(&renderPass, texture);
         pipeline.bind_vertex_buffer(&renderPass, gpuBuffer);
         try pipeline.end(renderPass);
