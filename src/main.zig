@@ -229,7 +229,9 @@ pub fn main() !void {
     }
 }
 
-// TODO: Bulk staging buffer uploading (single copyPass)
+// TODO: Add software-texture to gpu-texture conversion using copy-pass
+//      -- accept a view of software-textures and bulk copy them
+//      -- the  view may contain only a single texture if desired
 // TODO: multi-thread asset loading
 // TODO: Mesh asset type
 // TODO: Sound asset type
