@@ -5,6 +5,7 @@ pub const sdl = @cImport({
 const std = @import("std");
 const builtin = @import("builtin");
 const assets = @import("assets.zig");
+const fixed_list = @import("fixed_list.zig");
 
 pub const Input = @import("input.zig");
 
@@ -836,17 +837,17 @@ pub fn map_stage_buffer(comptime T: type, stagingInfo: BufferStagingInfo) ![*]T 
     return @ptrCast(@alignCast(transfer_buffer));
 }
 
-pub fn submit_stage_buffer(comptime result: type, stagingInfo: *BufferStagingInfo) !result {
+pub fn submit_stage_buffer(comptime result: type, stagingInfo: *BufferStagingInfo, copy_pass: ?*CopyPass) !?result {
     if (result == GPUBuffer) {
-        return submit_stage_buffer_buffer(stagingInfo);
+        return submit_stage_buffer_buffer(stagingInfo, copy_pass);
     }
     if (result == GPUTexture) {
-        return submit_stage_buffer_sampler(stagingInfo);
+        return submit_stage_buffer_sampler(stagingInfo, copy_pass);
     }
     @compileError("Invalid result type for submit stage buffer. Expected GPUBuffer or GPUTexture");
 }
 
-pub fn submit_stage_buffer_sampler(stagingInfo: *BufferStagingInfo) !GPUTexture {
+pub fn submit_stage_buffer_sampler(stagingInfo: *BufferStagingInfo, copy_pass: ?*CopyPass) !?GPUTexture {
     const destination = switch (stagingInfo.destination) {
         .texture => |t| t,
         else => return error.InvalidConfigurationForTextureSubmission,
@@ -854,7 +855,30 @@ pub fn submit_stage_buffer_sampler(stagingInfo: *BufferStagingInfo) !GPUTexture 
 
     sdl.SDL_UnmapGPUTransferBuffer(gpu_device, stagingInfo.staging);
 
+    if (copy_pass) |cp| {
+        sdl.SDL_UploadToGPUTexture(
+            cp.copy_pass,
+            &.{
+                .transfer_buffer = stagingInfo.staging,
+                .offset = 0,
+            },
+            &.{
+                .texture = destination.handle,
+                .w = destination.info.width,
+                .h = destination.info.height,
+                .d = 1,
+            },
+            false,
+        );
+        return null;
+    }
+
     const commandBuffer = sdl.SDL_AcquireGPUCommandBuffer(gpu_device);
+
+    if (commandBuffer == null) {
+        return error.NullCommandBuffer;
+    }
+
     const copyPass = sdl.SDL_BeginGPUCopyPass(commandBuffer);
 
     sdl.SDL_UploadToGPUTexture(
@@ -877,15 +901,14 @@ pub fn submit_stage_buffer_sampler(stagingInfo: *BufferStagingInfo) !GPUTexture 
         return error.CouldNotCopyBuferData;
     }
 
+    return try finalize_stage_sampler_submit(stagingInfo, destination);
+}
+
+fn finalize_stage_sampler_submit(stagingInfo: *BufferStagingInfo, destination: BufferStagingInfoDestinationTarget.Texture) !GPUTexture {
     if (!stagingInfo.keep_staging_buffer) {
         sdl.SDL_ReleaseGPUTransferBuffer(gpu_device, stagingInfo.staging);
         stagingInfo.staging = null;
     }
-
-    // defer {
-    //     stagingInfo.destination = .none;
-    //     stagingInfo.release();
-    // }
 
     if (destination.info.enable_mipmaps) {
         const buffer2 = sdl.SDL_AcquireGPUCommandBuffer(gpu_device);
@@ -903,13 +926,26 @@ pub fn submit_stage_buffer_sampler(stagingInfo: *BufferStagingInfo) !GPUTexture 
     };
 }
 
-pub fn submit_stage_buffer_buffer(stagingInfo: *BufferStagingInfo) !GPUBuffer {
+pub fn submit_stage_buffer_buffer(stagingInfo: *BufferStagingInfo, copy_pass: ?*CopyPass) !?GPUBuffer {
     const destination = switch (stagingInfo.destination) {
         .buffer => |b| b,
         else => return error.InvalidConfigurationForBufferSubmission,
     };
 
     sdl.SDL_UnmapGPUTransferBuffer(gpu_device, stagingInfo.staging);
+
+    if (copy_pass) |cp| {
+        sdl.SDL_UploadToGPUBuffer(cp.copy_pass, &.{
+            .transfer_buffer = stagingInfo.staging,
+            .offset = 0,
+        }, &.{
+            .buffer = destination.handle,
+            .offset = 0,
+            .size = @intCast(stagingInfo.total_size_bytes),
+        }, false);
+
+        return null;
+    }
 
     const commandBuffer = sdl.SDL_AcquireGPUCommandBuffer(gpu_device);
 
@@ -937,15 +973,14 @@ pub fn submit_stage_buffer_buffer(stagingInfo: *BufferStagingInfo) !GPUBuffer {
         return error.CouldNotCopyBufferData;
     }
 
+    return finalize_stage_buffer_submit(stagingInfo, destination);
+}
+
+fn finalize_stage_buffer_submit(stagingInfo: *BufferStagingInfo, destination: BufferStagingInfoDestinationTarget.Buffer) GPUBuffer {
     if (!stagingInfo.keep_staging_buffer) {
         sdl.SDL_ReleaseGPUTransferBuffer(gpu_device, stagingInfo.staging);
         stagingInfo.staging = null;
     }
-
-    // defer {
-    //     stagingInfo.destination = .none;
-    //     stagingInfo.release();
-    // }
 
     return GPUBuffer{
         .handle = destination.handle.?,
@@ -954,6 +989,193 @@ pub fn submit_stage_buffer_buffer(stagingInfo: *BufferStagingInfo) !GPUBuffer {
         .size = stagingInfo.total_size_bytes,
     };
 }
+
+pub const CopyPassErrors = error{
+    BatchIsFull,
+    OutOfMemory,
+    UnclaimedResults,
+    NullCommandBuffer,
+    NullCopyPass,
+    UploadFailure,
+    MipmapGen,
+};
+
+pub const CopyPass = struct {
+    const This = @This();
+    pub const tag_t = u64;
+    const TaggedBufferInfo = struct {
+        staging_info: BufferStagingInfo,
+        tag: tag_t,
+    };
+    const Result = struct {
+        tag: tag_t,
+        value: union(enum) {
+            gpu_texture: GPUTexture,
+            gpu_buffer: GPUBuffer,
+        },
+    };
+    const BATCH_SIZE = 64;
+
+    elements_to_copy: fixed_list.FixedList(TaggedBufferInfo, BATCH_SIZE),
+    results: fixed_list.FixedList(Result, BATCH_SIZE),
+    tag_map: std.StringHashMap(tag_t),
+    tag_counter: tag_t,
+    copy_pass: ?*sdl.SDL_GPUCopyPass,
+
+    pub fn init(allocator: std.mem.Allocator) This {
+        return This{
+            .elements_to_copy = fixed_list.FixedList(TaggedBufferInfo, BATCH_SIZE).init(),
+            .results = fixed_list.FixedList(Result, BATCH_SIZE).init(),
+            .tag_map = std.StringHashMap(tag_t).init(allocator),
+            .tag_counter = 0,
+            .copy_pass = null,
+        };
+    }
+
+    pub fn deinit(this: This) void {
+        for (this.results.items) |*result| {
+            switch (result.value) {
+                .gpu_texture => |*t| {
+                    t.release();
+                },
+                .gpu_buffer => |*b| {
+                    b.release();
+                },
+            }
+        }
+    }
+
+    pub fn add_stage_buffer(this: *This, stagingInfo: BufferStagingInfo, tag: tag_t) CopyPassErrors!void {
+        if (this.elements_to_copy.full()) {
+            return CopyPassErrors.BatchIsFull;
+        }
+
+        const taggedBuffer = TaggedBufferInfo{
+            .staging_info = stagingInfo,
+            .tag = tag,
+        };
+
+        this.elements_to_copy.add(taggedBuffer) catch unreachable; // should not be hit because we're checking capacity at function start
+    }
+
+    pub fn submit(this: *This) CopyPassErrors!void {
+        if (this.elements_to_copy.empty()) return;
+        if (!this.results.empty()) return CopyPassErrors.UnclaimedResults;
+
+        const commandBuffer = sdl.SDL_AcquireGPUCommandBuffer(gpu_device);
+        if (commandBuffer == null) {
+            return CopyPassErrors.NullCommandBuffer;
+        }
+
+        const copyPass = sdl.SDL_BeginGPUCopyPass(commandBuffer);
+        if (copyPass == null) {
+            return CopyPassErrors.NullCommandBuffer;
+        }
+
+        this.copy_pass = copyPass;
+
+        for (this.elements_to_copy.items) |*element| {
+            switch (element.staging_info.destination) {
+                .buffer => {
+                    _ = submit_stage_buffer_buffer(&element.staging_info, this) catch return error.UploadFailure;
+                },
+                .texture => {
+                    _ = submit_stage_buffer_sampler(&element.staging_info, this) catch return error.UploadFailure;
+                },
+                .none => unreachable,
+            }
+        }
+
+        sdl.SDL_EndGPUCopyPass(copyPass);
+        if (!sdl.SDL_SubmitGPUCommandBuffer(commandBuffer)) {
+            return error.UploadFailure;
+        }
+
+        for (this.elements_to_copy.items) |*element| {
+            switch (element.staging_info.destination) {
+                .buffer => |destb| {
+                    const buffer = finalize_stage_buffer_submit(&element.staging_info, destb);
+                    this.results.add(.{
+                        .tag = element.tag,
+                        .value = .{
+                            .gpu_buffer = buffer,
+                        },
+                    }) catch unreachable; // results should be start out empty and have equal capacity to the batch size. This shoudn't happen
+                },
+                .texture => |texb| {
+                    const tex = finalize_stage_sampler_submit(&element.staging_info, texb) catch return error.MipmapGen;
+                    this.results.add(.{
+                        .tag = element.tag,
+                        .value = .{
+                            .gpu_texture = tex,
+                        },
+                    }) catch unreachable;
+                },
+                .none => unreachable,
+            }
+        }
+
+        this.elements_to_copy.reset();
+    }
+
+    pub fn get_result(this: This, comptime T: type, tag: tag_t) ?T {
+        for (this.results.items) |result| {
+            if (tag == result.tag) {
+                switch (T) {
+                    GPUBuffer => {
+                        switch (result.value) {
+                            .gpu_buffer => |b| return b,
+                            else => unreachable,
+                        }
+                    },
+                    GPUTexture => {
+                        switch (result.value) {
+                            .gpu_texture => |t| return t,
+                            else => unreachable,
+                        }
+                    },
+                    else => @compileError("Invalid Type for get_result. Expected GPUBuffer or GPUTexture, Got: " ++ @typeName(T)),
+                }
+            }
+        }
+
+        // if (result.tag == tag) {
+        //     switch (result.value) {
+        //         .gpu_texture => |tex| {
+        //             std.debug.assert(T == GPUTexture);
+        //             return tex;
+        //         },
+        //         .gpu_buffer => |buf| {
+        //             std.debug.assert(T == GPUBuffer);
+        //             return buf;
+        //         },
+        //     }
+        // }
+
+        return null;
+    }
+
+    // call this AFTER you have accepted ownership of ALL of your results
+    // failure to do so will cause the cleanup for said to either happen at
+    // cleanup or cause any subsequent submit to panic.
+    pub fn claim_ownership_of_results(this: *This) void {
+        this.results.reset();
+    }
+
+    pub fn new_tag(this: *This, name: []const u8) !tag_t {
+        std.debug.assert(!this.tag_map.contains(name));
+
+        this.tag_counter += 1;
+
+        this.tag_map.put(name, this.tag_counter) catch return CopyPassErrors.OutOfMemory;
+
+        return this.tag_counter;
+    }
+
+    pub fn lookup_tag(this: This, name: []const u8) ?tag_t {
+        return this.tag_map.get(name);
+    }
+};
 
 pub const GPUSamplerFilter = enum {
     Linear,

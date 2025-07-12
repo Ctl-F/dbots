@@ -14,7 +14,7 @@ const Vertex = extern struct {
     v: f32,
 };
 
-fn upload_sprite(sprite: assets.SoftwareTexture) !host.GPUTexture {
+fn upload_sprite(copyPass: *host.CopyPass, name: []const u8, sprite: assets.SoftwareTexture) !void {
     const config = host.BufferCreateInfo{
         .dynamic_upload = false,
         .element_size = undefined,
@@ -31,17 +31,20 @@ fn upload_sprite(sprite: assets.SoftwareTexture) !host.GPUTexture {
         },
         .usage = .Sampler,
     };
-    var stage = try host.begin_stage_buffer(config);
+    const stage = try host.begin_stage_buffer(config);
     const buffer = try host.map_stage_buffer(u8, stage);
 
     const size: usize = @intCast(sprite.width * sprite.height * sprite.bytes_per_pixel);
     const view = buffer[0..size];
     @memcpy(view, @as([*c]const u8, @ptrCast(@alignCast(sprite.pixels)))[0..size]);
 
-    return try host.submit_stage_buffer(host.GPUTexture, &stage);
+    const tag = try copyPass.new_tag(name);
+    try copyPass.add_stage_buffer(stage, tag);
+
+    //return try host.submit_stage_buffer(host.GPUTexture, &stage);
 }
 
-fn get_triangle_buffer(format: host.VertexFormat) !host.GPUBuffer {
+fn get_triangle_buffer(copyPass: *host.CopyPass, name: []const u8, format: host.VertexFormat) !void {
     // const triangle = [_]Vertex{
     //     .{ .x = -0.75, .y = -0.75, .z = 0, .r = 0.3, .g = 0, .b = 0.3, .u = 0.0, .v = 0.0 },
     //     .{ .x = 0.75, .y = -0.75, .z = 0, .r = 0.3, .g = 0, .b = 0.3, .u = 1.0, .v = 0.0 },
@@ -70,7 +73,7 @@ fn get_triangle_buffer(format: host.VertexFormat) !host.GPUBuffer {
         .{ .x = 3.0, .y = 0.0, .z = 3.0, .r = 1.0, .g = 1.0, .b = 1.0, .u = 1.0, .v = 1.0 },
     };
 
-    var stagingInfo = try host.begin_stage_buffer(host.BufferCreateInfo{
+    const stagingInfo = try host.begin_stage_buffer(host.BufferCreateInfo{
         .usage = .Vertex,
         .element_size = format.stride,
         .num_elements = triangle.len,
@@ -82,7 +85,10 @@ fn get_triangle_buffer(format: host.VertexFormat) !host.GPUBuffer {
 
     @memcpy(stagingBuffer[0..triangle.len], triangle[0..]);
 
-    return try host.submit_stage_buffer(host.GPUBuffer, &stagingInfo);
+    const tag = try copyPass.new_tag(name);
+    try copyPass.add_stage_buffer(stagingInfo, tag);
+
+    //return try host.submit_stage_buffer(host.GPUBuffer, &stagingInfo);
 }
 
 const UniformColor = extern struct {
@@ -170,10 +176,19 @@ pub fn main() !void {
     const pipeline = try host.Pipeline.init(pipelineInfo);
     defer pipeline.free();
 
-    const gpuBuffer = try get_triangle_buffer(vertexFormat);
-    defer gpuBuffer.release();
+    var copyPass = host.CopyPass.init(host.MemAlloc);
+    try get_triangle_buffer(&copyPass, "triangle_buffer", vertexFormat);
+    try upload_sprite(&copyPass, "dragon_eye", scene.get(assets.SoftwareTexture, "dragon_eye") orelse unreachable);
+    try copyPass.submit();
 
-    const texture = try upload_sprite(scene.get(assets.SoftwareTexture, "dragon_eye") orelse unreachable);
+    const gpuBuffer = copyPass.get_result(host.GPUBuffer, copyPass.lookup_tag("triangle_buffer") orelse unreachable) orelse unreachable;
+    defer gpuBuffer.release();
+    const texture = copyPass.get_result(host.GPUTexture, copyPass.lookup_tag("dragon_eye") orelse unreachable) orelse unreachable;
+    defer texture.release();
+
+    // const gpuBuffer = try get_triangle_buffer(vertexFormat);
+    // defer gpuBuffer.release();
+    // const texture = try upload_sprite(scene.get(assets.SoftwareTexture, "dragon_eye") orelse unreachable);
 
     scene.free_resource("basic_vert");
     scene.free_resource("basic_frag");
@@ -182,9 +197,9 @@ pub fn main() !void {
 
     var color: UniformColor = .{ .color = @splat(1) };
     var transform: UniformTransform = .{
-        .projection = math.mat4_build_perspective(90.0, @as(f32, @floatFromInt(options.display.width)) / @as(f32, @floatFromInt(options.display.height)), 0.01, 100.0),
-        .view = math.mat4_build_lookat(.{ 0, 1, 3 }, .{ 0, 0, 0 }, .{ 0, 1, 0 }),
-        .model = math.mat4_build_ident(),
+        .projection = math.mat4.perspectiveReversedZ(60.0, @as(f32, @floatFromInt(options.display.width)) / @as(f32, @floatFromInt(options.display.height)), 0.01),
+        .view = math.mat4.lookAt(math.vec3.new(0, 2, 3), math.vec3.zero(), math.vec3.up()),
+        .model = math.mat4.identity(),
     };
 
     host.input_mode(.Keyboard);
@@ -199,7 +214,7 @@ pub fn main() !void {
         angle_y += input.mouse_x_rel * 0.01;
         angle_x -= input.mouse_y_rel * 0.01;
 
-        transform.view = math.mat4_build_lookat(.{ 0, 1, 3 }, .{ 0, 0, 0 }, .{ 0, 1, 0 });
+        transform.view = math.mat4.lookAt(math.vec3.new(0, 2, 3), math.vec3.zero(), math.vec3.up());
 
         if (input.action_just_pressed(.Pause)) {
             break :app;
@@ -216,8 +231,6 @@ pub fn main() !void {
 
 // TODO: Bulk staging buffer uploading (single copyPass)
 // TODO: multi-thread asset loading
-// TODO: Input abstraction
-// TODO: Projection/lookat caclulations
 // TODO: Mesh asset type
 // TODO: Sound asset type
 // TODO: Level Layout asset type

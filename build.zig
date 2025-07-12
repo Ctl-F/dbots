@@ -16,6 +16,10 @@ pub fn build(b: *std.Build) void {
         .root_module = exe_mod,
     });
 
+    const zalgebra = b.dependency("zalgebra", .{}).module("zalgebra");
+
+    exe.root_module.addImport("zalgebra", zalgebra);
+
     exe.linkLibC();
     exe.linkSystemLibrary("SDL3");
     exe.addCSourceFile(.{ .file = b.path("src/c/stb_image.c"), .language = .c });

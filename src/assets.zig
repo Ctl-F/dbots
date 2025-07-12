@@ -389,39 +389,3 @@ pub const SceneResources = struct {
         }
     }
 };
-
-// pub const SoftwareTexture = struct {
-//     const This = @This();
-
-//     surface: [*c]sdl.SDL_Surface,
-
-//     pub fn load(asset: []const u8) !This {
-//         const allocator = host.MemAlloc;
-
-//         const path = try get_asset_pathz(allocator, asset);
-//         defer allocator.free(path);
-
-//         const surface = sdl.IMG_Load(path.ptr);
-//         defer sdl.SDL_DestroySurface(surface);
-
-//         if (surface == null) {
-//             return error.ImageLoadError;
-//         }
-
-//         const actual_surface = sdl.SDL_ConvertSurface(surface, host.INTERNAL_PIXEL_FORMAT);
-//         if (actual_surface == null) {
-//             return error.UnableToConvertSurface;
-//         }
-
-//         const fmt = actual_surface.*.format;
-//         const details = sdl.SDL_GetPixelFormatDetails(fmt);
-//         std.debug.print("Surface format: {s}\n", .{sdl.SDL_GetPixelFormatName(fmt)});
-//         std.debug.print("Rmask: {x} Gmask: {x} Bmask: {x} Amask: {x}\n", .{ details.*.Rmask, details.*.Gmask, details.*.Bmask, details.*.Amask });
-
-//         return This{ .surface = actual_surface };
-//     }
-
-//     pub fn release(this: This) void {
-//         sdl.SDL_DestroySurface(this.surface);
-//     }
-// };
