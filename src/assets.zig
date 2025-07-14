@@ -347,6 +347,49 @@ pub const SceneResources = struct {
         try this.lookup.put(request.asset_name, node);
     }
 
+    pub const TextureUploadInfo = struct {
+        name: []const u8,
+        info: host.GPUSamplerInfo,
+    };
+
+    pub fn convert_texture(this: *This, names: []const TextureUploadInfo) !void {
+        std.debug.assert(names.len <= host.CopyPass.BATCH_SIZE);
+
+        var copyPass = host.CopyPass.init(host.MemAlloc);
+
+        var config: host.BufferCreateInfo = .{
+            .dynamic_upload = false,
+            .element_size = undefined,
+            .num_elements = undefined,
+            .texture_info = undefined,
+            .usage = .Sampler,
+        };
+
+        var tags: [host.CopyPass.BATH_SIZE]host.tag_t = undefined;
+
+        for(names, 0..) |info, idx| {
+            const texture = this.get(SoftwareTexture, info.name) orelse return error.InvalidAssetName;
+            config.texture_info = info.info;
+
+            const stage = try host.begin_stage_buffer(config);
+            const buffer = try host.map_stage_buffer(u8, stage);
+
+            const size: usize = @intCast(texture.width * texture.height * texture.bytes_per_pixel);
+            const view = buffer[0..size];
+            @memcpy(view, @as([*c]cosnt u8, @ptrCast(@alignCast(texture.pixels)))[0..size]);
+
+            const tag = try copyPass.new_tag(info.name);
+            try copyPass.add_stage_buffer(stage, tag);
+            tags[idx] = tag;
+        }
+
+        try copyPass.submit();
+
+        for(0..)
+
+    }
+
+
     pub fn free_resource(this: *This, name: []const u8) void {
         const lookup_node = this.lookup.getPtr(name);
 

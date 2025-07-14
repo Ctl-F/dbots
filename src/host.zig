@@ -1014,7 +1014,7 @@ pub const CopyPass = struct {
             gpu_buffer: GPUBuffer,
         },
     };
-    const BATCH_SIZE = 64;
+    pub const BATCH_SIZE = 64;
 
     elements_to_copy: fixed_list.FixedList(TaggedBufferInfo, BATCH_SIZE),
     results: fixed_list.FixedList(Result, BATCH_SIZE),
