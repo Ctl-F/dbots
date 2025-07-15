@@ -352,43 +352,75 @@ pub const SceneResources = struct {
         info: host.GPUSamplerInfo,
     };
 
-    pub fn convert_texture(this: *This, names: []const TextureUploadInfo) !void {
-        std.debug.assert(names.len <= host.CopyPass.BATCH_SIZE);
-
-        var copyPass = host.CopyPass.init(host.MemAlloc);
-
-        var config: host.BufferCreateInfo = .{
+    pub fn add_texture_to_copy_pass(this: *This, texture: TextureUploadInfo, copyPass: *host.CopyPass) !host.CopyPass.tag_t {
+        const config = host.BufferCreateInfo{
             .dynamic_upload = false,
             .element_size = undefined,
             .num_elements = undefined,
-            .texture_info = undefined,
+            .texture_info = texture.info,
             .usage = .Sampler,
         };
 
+        const swTexture = this.get(SoftwareTexture, texture.name) orelse return error.InvalidAssetName;
+
+        const stage = try host.begin_stage_buffer(config);
+        const buffer = try host.map_stage_buffer(u8, stage);
+        const size: usize = @intCast(swTexture.width * swTexture.height * swTexture.bytes_per_pixel);
+        const view = buffer[0..size];
+        @memcpy(view, @as([*c]const u8, @ptrCast(@alignCast(swTexture.pixels)))[0..size]);
+
+        const tag = try copyPass.new_tag(texture.name);
+        try copyPass.add_stage_buffer(stage, tag);
+
+        return tag;
+    }
+
+    pub fn obtain_texture_from_copy_pass(this: *This, copyPass: host.CopyPass, name: []const u8) !void {
+        const tag = copyPass.lookup_tag(name) orelse return error.InvalidAssetName;
+        const texture = copyPass.get_result(host.GPUTexture, tag) orelse unreachable;
+        std.debug.assert(!this.textures.contains(name));
+        try this.textures.put(name, texture);
+    }
+
+    fn assert_asset_exists(this: This, comptime T: type, name: []const u8) void {
+        const lookup = this.lookup.get(name) orelse unreachable;
+        switch (T) {
+            RawBuffer => std.debug.assert(lookup.resource_type == .raw),
+            Shader => std.debug.assert(lookup.resource_type == .shader),
+            SoftwareTexture => std.debug.assert(lookup.resource_type == .texture),
+            host.GPUTexture => std.debug.assert(lookup.resource_type == .gpu_texture),
+            else => unreachable,
+        }// TODO: Fix this -- the current limitation is that only one resource can have a name between all types.
+    }   // the logic implemented here assumes resources can have the same name of different types (false)
+        // and also ignores the lookup table entirely. This needs to be fixed and a good naming system(auto-naming-system?)
+        // needs to be implemented
+
+    pub fn convert_textures(this: *This, textures: []const TextureUploadInfo) !void {
+        std.debug.assert(textures.len <= host.CopyPass.BATCH_SIZE);
+
+        var copyPass = host.CopyPass.init(host.MemAlloc);
+        defer copyPass.deinit();
+
         var tags: [host.CopyPass.BATH_SIZE]host.tag_t = undefined;
 
-        for(names, 0..) |info, idx| {
-            const texture = this.get(SoftwareTexture, info.name) orelse return error.InvalidAssetName;
-            config.texture_info = info.info;
-
-            const stage = try host.begin_stage_buffer(config);
-            const buffer = try host.map_stage_buffer(u8, stage);
-
-            const size: usize = @intCast(texture.width * texture.height * texture.bytes_per_pixel);
-            const view = buffer[0..size];
-            @memcpy(view, @as([*c]cosnt u8, @ptrCast(@alignCast(texture.pixels)))[0..size]);
-
-            const tag = try copyPass.new_tag(info.name);
-            try copyPass.add_stage_buffer(stage, tag);
-            tags[idx] = tag;
+        for (textures, 0..) |info, idx| {
+            tags[idx] = try this.add_texture_to_copy_pass(info, &copyPass);
         }
 
         try copyPass.submit();
 
-        for(0..)
+        for (0..textures.len) |idx| {
+            // this should never be null because we have explicitly obtained every one of these tags in the first loop
+            // of this same function
+            // and we have (theoretically) successfully submitted the copyPass.
+            const gtexture = copyPass.get_result(host.GPUTexture, tags[idx]) orelse unreachable;
 
+            this.assert_asset_exists(this: This, comptime T: type, name: []const u8)
+
+            try this.textures.put(textures[idx].name, gtexture);
+        }
+        copyPass.claim_ownership_of_results();
     }
-
 
     pub fn free_resource(this: *This, name: []const u8) void {
         const lookup_node = this.lookup.getPtr(name);

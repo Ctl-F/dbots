@@ -14,35 +14,35 @@ const Vertex = extern struct {
     v: f32,
 };
 
-fn upload_sprite(copyPass: *host.CopyPass, name: []const u8, sprite: assets.SoftwareTexture) !void {
-    const config = host.BufferCreateInfo{
-        .dynamic_upload = false,
-        .element_size = undefined,
-        .num_elements = undefined,
-        .texture_info = .{
-            .address_policy = .Repeat,
-            .enable_mipmaps = false,
-            .width = @intCast(sprite.width),
-            .height = @intCast(sprite.height),
-            .mag_filter = .Nearest,
-            .min_filter = .Nearest,
-            .mipmap_filter = .Nearest,
-            .texture_name = "Dragon Eye",
-        },
-        .usage = .Sampler,
-    };
-    const stage = try host.begin_stage_buffer(config);
-    const buffer = try host.map_stage_buffer(u8, stage);
+// fn upload_sprite(copyPass: *host.CopyPass, name: []const u8, sprite: assets.SoftwareTexture) !void {
+//     const config = host.BufferCreateInfo{
+//         .dynamic_upload = false,
+//         .element_size = undefined,
+//         .num_elements = undefined,
+//         .texture_info = .{
+//             .address_policy = .Repeat,
+//             .enable_mipmaps = false,
+//             .width = @intCast(sprite.width),
+//             .height = @intCast(sprite.height),
+//             .mag_filter = .Nearest,
+//             .min_filter = .Nearest,
+//             .mipmap_filter = .Nearest,
+//             .texture_name = "Dragon Eye",
+//         },
+//         .usage = .Sampler,
+//     };
+//     const stage = try host.begin_stage_buffer(config);
+//     const buffer = try host.map_stage_buffer(u8, stage);
 
-    const size: usize = @intCast(sprite.width * sprite.height * sprite.bytes_per_pixel);
-    const view = buffer[0..size];
-    @memcpy(view, @as([*c]const u8, @ptrCast(@alignCast(sprite.pixels)))[0..size]);
+//     const size: usize = @intCast(sprite.width * sprite.height * sprite.bytes_per_pixel);
+//     const view = buffer[0..size];
+//     @memcpy(view, @as([*c]const u8, @ptrCast(@alignCast(sprite.pixels)))[0..size]);
 
-    const tag = try copyPass.new_tag(name);
-    try copyPass.add_stage_buffer(stage, tag);
+//     const tag = try copyPass.new_tag(name);
+//     try copyPass.add_stage_buffer(stage, tag);
 
-    //return try host.submit_stage_buffer(host.GPUTexture, &stage);
-}
+//     //return try host.submit_stage_buffer(host.GPUTexture, &stage);
+// }
 
 fn get_triangle_buffer(copyPass: *host.CopyPass, name: []const u8, format: host.VertexFormat) !void {
     // const triangle = [_]Vertex{
@@ -178,12 +178,33 @@ pub fn main() !void {
 
     var copyPass = host.CopyPass.init(host.MemAlloc);
     try get_triangle_buffer(&copyPass, "triangle_buffer", vertexFormat);
-    try upload_sprite(&copyPass, "dragon_eye", scene.get(assets.SoftwareTexture, "dragon_eye") orelse unreachable);
+    //try upload_sprite(&copyPass, "dragon_eye", scene.get(assets.SoftwareTexture, "dragon_eye") orelse unreachable);
+
+    {
+        const dreye_ref = scene.get(assets.SoftwareTexture, "dragon_eye") orelse unreachable;
+
+        _ = try scene.add_texture_to_copy_pass(.{
+            .name = "dragon_eye",
+            .info = .{
+                .address_policy = .Repeat,
+                .enable_mipmaps = false,
+                .width = dreye_ref.width,
+                .height = dreye_ref.height,
+                .mag_filter = .Nearest,
+                .min_filter = .Nearest,
+                .mipmap_filter = .Nearest,
+                .texture_name = "dragon_eye",
+            },
+        }, &copyPass);
+    }
+
     try copyPass.submit();
+
+    try scene.obtain_texture_from_copy_pass(copyPass, "dragon_eye");
 
     const gpuBuffer = copyPass.get_result(host.GPUBuffer, copyPass.lookup_tag("triangle_buffer") orelse unreachable) orelse unreachable;
     defer gpuBuffer.release();
-    const texture = copyPass.get_result(host.GPUTexture, copyPass.lookup_tag("dragon_eye") orelse unreachable) orelse unreachable;
+    const texture = scene.get(host.GPUTexture, "dragon_eye") orelse unreachable;
     defer texture.release();
 
     // const gpuBuffer = try get_triangle_buffer(vertexFormat);
