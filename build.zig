@@ -17,11 +17,11 @@ pub fn build(b: *std.Build) void {
     });
 
     const zalgebra = b.dependency("zalgebra", .{}).module("zalgebra");
-
     exe.root_module.addImport("zalgebra", zalgebra);
 
     exe.linkLibC();
     exe.linkSystemLibrary("SDL3");
+    exe.linkSystemLibrary("SDL3_ttf");
     exe.addCSourceFile(.{ .file = b.path("src/c/stb_image.c"), .language = .c });
     exe.addIncludePath(b.path("src/c/"));
 

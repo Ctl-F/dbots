@@ -184,6 +184,20 @@ pub const SoftwareTexture = struct {
     }
 };
 
+pub const Font = struct {
+    const ATLAS_NAME_TEMPLATE = "FCACHE_##_##_####";
+
+    handle: ?*sdl.TTF_Font,
+    size: f32,
+    // map string --> cache of software_textures in
+    atlas_texture: []const u8,
+
+    pub fn release(this: @This(), scene: *SceneResources) void {
+        sdl.TTF_CloseFont(this.handle);
+        scene.free_resource(this.atlas_texture);
+    }
+};
+
 pub const ResourceType = union(enum) {
     raw: Raw,
     shader: ShaderRes,
@@ -191,6 +205,7 @@ pub const ResourceType = union(enum) {
     mesh: Mesh,
     gpu_texture: GPUTexture,
     gpu_buffer: GPUBuffer,
+    font: TFont,
 
     pub const Raw = struct {};
     pub const Mesh = struct {
@@ -205,6 +220,7 @@ pub const ResourceType = union(enum) {
     };
     pub const GPUTexture = struct {};
     pub const GPUBuffer = struct {};
+    pub const TFont = struct {};
 };
 
 pub const ResourceRequest = struct {
@@ -216,7 +232,7 @@ pub const ResourceRequest = struct {
 const ResourceLookupNode = struct {
     resource_name: []const u8,
     resource_type: ResourceType,
-    index: usize,
+    index: SceneResources.key_t,
 };
 
 pub const RawBuffer = struct {
@@ -225,25 +241,28 @@ pub const RawBuffer = struct {
 
 pub const SceneResources = struct {
     const This = @This();
+    pub const key_t = usize;
 
     lookup: std.StringHashMap(ResourceLookupNode),
-    shaders: std.AutoHashMap(usize, Shader),
-    texture_sources: std.AutoHashMap(usize, SoftwareTexture),
-    textures: std.AutoHashMap(usize, host.GPUTexture),
-    binaries: std.AutoHashMap(usize, RawBuffer),
-    buffers: std.AutoHashMap(usize, host.GPUBuffer),
+    shaders: std.AutoHashMap(key_t, Shader),
+    texture_sources: std.AutoHashMap(key_t, SoftwareTexture),
+    textures: std.AutoHashMap(key_t, host.GPUTexture),
+    binaries: std.AutoHashMap(key_t, RawBuffer),
+    buffers: std.AutoHashMap(key_t, host.GPUBuffer),
+    fonts: std.AutoHashMap(key_t, Font),
     allocator: std.mem.Allocator,
-    id_counter: usize,
+    id_counter: key_t,
 
     pub fn init(allocator: std.mem.Allocator) This {
         return This{
             .allocator = allocator,
             .lookup = std.StringHashMap(ResourceLookupNode).init(allocator),
-            .shaders = std.AutoHashMap(usize, Shader).init(allocator),
-            .texture_sources = std.AutoHashMap(usize, SoftwareTexture).init(allocator),
-            .textures = std.AutoHashMap(usize, host.GPUTexture).init(allocator),
-            .binaries = std.AutoHashMap(usize, RawBuffer).init(allocator),
-            .buffers = std.AutoHashMap(usize, host.GPUBuffer).init(allocator),
+            .shaders = std.AutoHashMap(key_t, Shader).init(allocator),
+            .texture_sources = std.AutoHashMap(key_t, SoftwareTexture).init(allocator),
+            .textures = std.AutoHashMap(key_t, host.GPUTexture).init(allocator),
+            .binaries = std.AutoHashMap(key_t, RawBuffer).init(allocator),
+            .buffers = std.AutoHashMap(key_t, host.GPUBuffer).init(allocator),
+            .fonts = std.AutoHashMap(key_t, Font).init(allocator),
             .id_counter = 0,
         };
     }
@@ -285,6 +304,9 @@ pub const SceneResources = struct {
                 std.debug.print("Incorrect resource type requested: {s} expected GPUBuffer\n", .{@typeName(T)});
                 unreachable;
             },
+            .font => if (T != Font) {
+                std.debug.print("Incorrect resource type requested: {s} expected Font\n", .{@typeName(T)});
+            },
         }
     }
 
@@ -303,6 +325,7 @@ pub const SceneResources = struct {
             SoftwareTexture => this.texture_sources.getPtr(lookup.index),
             host.GPUTexture => this.textures.getPtr(lookup.index),
             host.GPUBuffer => this.buffers.getPtr(lookup.index),
+            Font => this.fonts.getPtr(lookup.index),
             else => {
                 @compileError("Unexpected type: " ++ @typeName(T));
             },
@@ -323,6 +346,9 @@ pub const SceneResources = struct {
             .texture => |t| {
                 return this.load_resource_texture(request, t);
             },
+            .font => {
+                return this.load_font(request);
+            },
             .gpu_texture => {
                 std.debug.print("GPU Texture is not a valid resource request. Must be created via texture conversion\n", .{});
                 unreachable;
@@ -331,6 +357,12 @@ pub const SceneResources = struct {
                 std.debug.print("Loading GPUBuffers directly is not a valid resource request. Must be created via buffer conversion\n", .{});
             },
         }
+    }
+
+    fn load_font(this: *This, request: ResourceRequest) !void {
+        _ = this;
+        _ = request;
+        return error.NotImplemented;
     }
 
     fn load_resource_texture(this: *This, request: ResourceRequest, textureRes: ResourceType.Texture) !void {
@@ -395,6 +427,7 @@ pub const SceneResources = struct {
             SoftwareTexture => &this.texture_sources,
             host.GPUTexture => &this.textures,
             host.GPUBuffer => &this.buffers,
+            Font => &this.fonts,
             else => @compileError("Asset type: " ++ @typeName(T) ++ " is not supported"),
         };
 
@@ -483,6 +516,7 @@ pub const SceneResources = struct {
             SoftwareTexture => std.debug.assert(lookup.resource_type == .texture),
             host.GPUTexture => std.debug.assert(lookup.resource_type == .gpu_texture),
             host.GPUBuffer => std.debug.assert(lookup.resource_type == .gpu_buffer),
+            Font => std.debug.assert(lookup.resource_type == .font),
             else => unreachable,
         }
     }
@@ -532,6 +566,11 @@ pub const SceneResources = struct {
                     const texture = this.texture_sources.get(node.index) orelse unreachable;
                     texture.release();
                     _ = this.texture_sources.remove(node.index);
+                },
+                .font => {
+                    const font = this.fonts.get(node.index) orelse unreachable;
+                    font.release();
+                    _ = this.fonts.remove(node.index, this);
                 },
                 .shader => {
                     var shader = this.shaders.getPtr(node.index) orelse unreachable;

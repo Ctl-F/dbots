@@ -1,5 +1,6 @@
 pub const sdl = @cImport({
     @cInclude("SDL3/SDL.h");
+    @cInclude("SDL3_ttf/SDL_ttf.h");
     //@cInclude("SDL3_image/SDL_image.h");
 });
 const std = @import("std");
@@ -227,7 +228,7 @@ pub const VertexFormat = struct {
     formats: []VertexFormatSpecifier,
     stride: u32,
 
-    pub fn begin() This {
+    pub fn begin() This {ned
         var instance = This{
             .formats_buffer = undefined,
             .formats = &.{},

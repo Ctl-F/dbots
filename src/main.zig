@@ -3,64 +3,6 @@ const host = @import("host.zig");
 const assets = @import("assets.zig");
 const math = @import("math.zig");
 
-// const Vertex = extern struct {
-//     x: f32,
-//     y: f32,
-//     z: f32,
-//     r: f32,
-//     g: f32,
-//     b: f32,
-//     u: f32,
-//     v: f32,
-// };
-
-// fn get_triangle_buffer(copyPass: *host.CopyPass, name: []const u8, format: host.VertexFormat) !void {
-//     // const triangle = [_]Vertex{
-//     //     .{ .x = -0.75, .y = -0.75, .z = 0, .r = 0.3, .g = 0, .b = 0.3, .u = 0.0, .v = 0.0 },
-//     //     .{ .x = 0.75, .y = -0.75, .z = 0, .r = 0.3, .g = 0, .b = 0.3, .u = 1.0, .v = 0.0 },
-//     //     .{ .x = -0.75, .y = 0, .z = 0, .r = 0, .g = 0, .b = 0.3, .u = 0.0, .v = 1.0 },
-
-//     //     .{ .x = -0.75, .y = 0, .z = 0, .r = 0, .g = 0, .b = 0.3, .u = 0.0, .v = 1.0 },
-//     //     .{ .x = 0.75, .y = 0, .z = 0, .r = 0, .g = 0, .b = 0.3, .u = 1.0, .v = 1.0 },
-//     //     .{ .x = 0.75, .y = -0.75, .z = 0, .r = 0.3, .g = 0, .b = 0.3, .u = 1.0, .v = 0.0 },
-
-//     //     .{ .x = -0.75, .y = 0.75, .z = 0, .r = 0, .g = 0.3, .b = 0.2, .u = 0.0, .v = 0.0 },
-//     //     .{ .x = 0.75, .y = 0.75, .z = 0, .r = 0, .g = 0.3, .b = 0.2, .u = 0.0, .v = 0.0 },
-//     //     .{ .x = -0.75, .y = 0, .z = 0, .r = 0, .g = 0, .b = 0.3, .u = 0.0, .v = 0.0 },
-
-//     //     .{ .x = -0.75, .y = 0, .z = 0, .r = 0, .g = 0, .b = 0.3, .u = 0.0, .v = 0.0 },
-//     //     .{ .x = 0.75, .y = 0.75, .z = 0, .r = 0, .g = 0.3, .b = 0.2, .u = 0.0, .v = 0.0 },
-//     //     .{ .x = 0.75, .y = 0, .z = 0, .r = 0, .g = 0, .b = 0.3, .u = 0.0, .v = 0.0 },
-//     // };
-
-//     const triangle = [_]Vertex{
-//         .{ .x = -3.0, .y = 0.0, .z = -3.0, .r = 1.0, .g = 1.0, .b = 1.0, .u = 0.0, .v = 0.0 },
-//         .{ .x = 3.0, .y = 0.0, .z = -3.0, .r = 1.0, .g = 1.0, .b = 1.0, .u = 1.0, .v = 0.0 },
-//         .{ .x = -3.0, .y = 0.0, .z = 3.0, .r = 1.0, .g = 1.0, .b = 1.0, .u = 0.0, .v = 1.0 },
-
-//         .{ .x = -3.0, .y = 0.0, .z = 3.0, .r = 1.0, .g = 1.0, .b = 1.0, .u = 0.0, .v = 1.0 },
-//         .{ .x = 3.0, .y = 0.0, .z = -3.0, .r = 1.0, .g = 1.0, .b = 1.0, .u = 1.0, .v = 0.0 },
-//         .{ .x = 3.0, .y = 0.0, .z = 3.0, .r = 1.0, .g = 1.0, .b = 1.0, .u = 1.0, .v = 1.0 },
-//     };
-
-//     const stagingInfo = try host.begin_stage_buffer(host.BufferCreateInfo{
-//         .usage = .Vertex,
-//         .element_size = format.stride,
-//         .num_elements = triangle.len,
-//         .dynamic_upload = false,
-//         .texture_info = null,
-//     });
-
-//     var stagingBuffer = try host.map_stage_buffer(Vertex, stagingInfo);
-
-//     @memcpy(stagingBuffer[0..triangle.len], triangle[0..]);
-
-//     const tag = try copyPass.new_tag(name);
-//     try copyPass.add_stage_buffer(stagingInfo, tag);
-
-//     //return try host.submit_stage_buffer(host.GPUBuffer, &stagingInfo);
-// }
-
 const UniformColor = extern struct {
     color: [4]f32,
 };
@@ -150,7 +92,6 @@ pub fn main() !void {
     defer pipeline.free();
 
     var copyPass = host.CopyPass.init(host.MemAlloc);
-    //try get_triangle_buffer(&copyPass, "triangle_buffer", vertexFormat);
 
     {
         const plane_ref = scene.get_lookup_info("basic_plane") orelse unreachable;
@@ -235,11 +176,8 @@ pub fn main() !void {
     }
 }
 
-// TODO: Add software-texture to gpu-texture conversion using copy-pass
-//      -- accept a view of software-textures and bulk copy them
-//      -- the  view may contain only a single texture if desired
 // TODO: multi-thread asset loading
-// TODO: Mesh asset type
 // TODO: Sound asset type
 // TODO: Level Layout asset type
 // TODO: Collisions
+// TODO: Text rendering
