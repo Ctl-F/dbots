@@ -3,93 +3,63 @@ const host = @import("host.zig");
 const assets = @import("assets.zig");
 const math = @import("math.zig");
 
-const Vertex = extern struct {
-    x: f32,
-    y: f32,
-    z: f32,
-    r: f32,
-    g: f32,
-    b: f32,
-    u: f32,
-    v: f32,
-};
+// const Vertex = extern struct {
+//     x: f32,
+//     y: f32,
+//     z: f32,
+//     r: f32,
+//     g: f32,
+//     b: f32,
+//     u: f32,
+//     v: f32,
+// };
 
-// fn upload_sprite(copyPass: *host.CopyPass, name: []const u8, sprite: assets.SoftwareTexture) !void {
-//     const config = host.BufferCreateInfo{
-//         .dynamic_upload = false,
-//         .element_size = undefined,
-//         .num_elements = undefined,
-//         .texture_info = .{
-//             .address_policy = .Repeat,
-//             .enable_mipmaps = false,
-//             .width = @intCast(sprite.width),
-//             .height = @intCast(sprite.height),
-//             .mag_filter = .Nearest,
-//             .min_filter = .Nearest,
-//             .mipmap_filter = .Nearest,
-//             .texture_name = "Dragon Eye",
-//         },
-//         .usage = .Sampler,
+// fn get_triangle_buffer(copyPass: *host.CopyPass, name: []const u8, format: host.VertexFormat) !void {
+//     // const triangle = [_]Vertex{
+//     //     .{ .x = -0.75, .y = -0.75, .z = 0, .r = 0.3, .g = 0, .b = 0.3, .u = 0.0, .v = 0.0 },
+//     //     .{ .x = 0.75, .y = -0.75, .z = 0, .r = 0.3, .g = 0, .b = 0.3, .u = 1.0, .v = 0.0 },
+//     //     .{ .x = -0.75, .y = 0, .z = 0, .r = 0, .g = 0, .b = 0.3, .u = 0.0, .v = 1.0 },
+
+//     //     .{ .x = -0.75, .y = 0, .z = 0, .r = 0, .g = 0, .b = 0.3, .u = 0.0, .v = 1.0 },
+//     //     .{ .x = 0.75, .y = 0, .z = 0, .r = 0, .g = 0, .b = 0.3, .u = 1.0, .v = 1.0 },
+//     //     .{ .x = 0.75, .y = -0.75, .z = 0, .r = 0.3, .g = 0, .b = 0.3, .u = 1.0, .v = 0.0 },
+
+//     //     .{ .x = -0.75, .y = 0.75, .z = 0, .r = 0, .g = 0.3, .b = 0.2, .u = 0.0, .v = 0.0 },
+//     //     .{ .x = 0.75, .y = 0.75, .z = 0, .r = 0, .g = 0.3, .b = 0.2, .u = 0.0, .v = 0.0 },
+//     //     .{ .x = -0.75, .y = 0, .z = 0, .r = 0, .g = 0, .b = 0.3, .u = 0.0, .v = 0.0 },
+
+//     //     .{ .x = -0.75, .y = 0, .z = 0, .r = 0, .g = 0, .b = 0.3, .u = 0.0, .v = 0.0 },
+//     //     .{ .x = 0.75, .y = 0.75, .z = 0, .r = 0, .g = 0.3, .b = 0.2, .u = 0.0, .v = 0.0 },
+//     //     .{ .x = 0.75, .y = 0, .z = 0, .r = 0, .g = 0, .b = 0.3, .u = 0.0, .v = 0.0 },
+//     // };
+
+//     const triangle = [_]Vertex{
+//         .{ .x = -3.0, .y = 0.0, .z = -3.0, .r = 1.0, .g = 1.0, .b = 1.0, .u = 0.0, .v = 0.0 },
+//         .{ .x = 3.0, .y = 0.0, .z = -3.0, .r = 1.0, .g = 1.0, .b = 1.0, .u = 1.0, .v = 0.0 },
+//         .{ .x = -3.0, .y = 0.0, .z = 3.0, .r = 1.0, .g = 1.0, .b = 1.0, .u = 0.0, .v = 1.0 },
+
+//         .{ .x = -3.0, .y = 0.0, .z = 3.0, .r = 1.0, .g = 1.0, .b = 1.0, .u = 0.0, .v = 1.0 },
+//         .{ .x = 3.0, .y = 0.0, .z = -3.0, .r = 1.0, .g = 1.0, .b = 1.0, .u = 1.0, .v = 0.0 },
+//         .{ .x = 3.0, .y = 0.0, .z = 3.0, .r = 1.0, .g = 1.0, .b = 1.0, .u = 1.0, .v = 1.0 },
 //     };
-//     const stage = try host.begin_stage_buffer(config);
-//     const buffer = try host.map_stage_buffer(u8, stage);
 
-//     const size: usize = @intCast(sprite.width * sprite.height * sprite.bytes_per_pixel);
-//     const view = buffer[0..size];
-//     @memcpy(view, @as([*c]const u8, @ptrCast(@alignCast(sprite.pixels)))[0..size]);
+//     const stagingInfo = try host.begin_stage_buffer(host.BufferCreateInfo{
+//         .usage = .Vertex,
+//         .element_size = format.stride,
+//         .num_elements = triangle.len,
+//         .dynamic_upload = false,
+//         .texture_info = null,
+//     });
+
+//     var stagingBuffer = try host.map_stage_buffer(Vertex, stagingInfo);
+
+//     @memcpy(stagingBuffer[0..triangle.len], triangle[0..]);
 
 //     const tag = try copyPass.new_tag(name);
-//     try copyPass.add_stage_buffer(stage, tag);
+//     try copyPass.add_stage_buffer(stagingInfo, tag);
 
-//     //return try host.submit_stage_buffer(host.GPUTexture, &stage);
+//     //return try host.submit_stage_buffer(host.GPUBuffer, &stagingInfo);
 // }
-
-fn get_triangle_buffer(copyPass: *host.CopyPass, name: []const u8, format: host.VertexFormat) !void {
-    // const triangle = [_]Vertex{
-    //     .{ .x = -0.75, .y = -0.75, .z = 0, .r = 0.3, .g = 0, .b = 0.3, .u = 0.0, .v = 0.0 },
-    //     .{ .x = 0.75, .y = -0.75, .z = 0, .r = 0.3, .g = 0, .b = 0.3, .u = 1.0, .v = 0.0 },
-    //     .{ .x = -0.75, .y = 0, .z = 0, .r = 0, .g = 0, .b = 0.3, .u = 0.0, .v = 1.0 },
-
-    //     .{ .x = -0.75, .y = 0, .z = 0, .r = 0, .g = 0, .b = 0.3, .u = 0.0, .v = 1.0 },
-    //     .{ .x = 0.75, .y = 0, .z = 0, .r = 0, .g = 0, .b = 0.3, .u = 1.0, .v = 1.0 },
-    //     .{ .x = 0.75, .y = -0.75, .z = 0, .r = 0.3, .g = 0, .b = 0.3, .u = 1.0, .v = 0.0 },
-
-    //     .{ .x = -0.75, .y = 0.75, .z = 0, .r = 0, .g = 0.3, .b = 0.2, .u = 0.0, .v = 0.0 },
-    //     .{ .x = 0.75, .y = 0.75, .z = 0, .r = 0, .g = 0.3, .b = 0.2, .u = 0.0, .v = 0.0 },
-    //     .{ .x = -0.75, .y = 0, .z = 0, .r = 0, .g = 0, .b = 0.3, .u = 0.0, .v = 0.0 },
-
-    //     .{ .x = -0.75, .y = 0, .z = 0, .r = 0, .g = 0, .b = 0.3, .u = 0.0, .v = 0.0 },
-    //     .{ .x = 0.75, .y = 0.75, .z = 0, .r = 0, .g = 0.3, .b = 0.2, .u = 0.0, .v = 0.0 },
-    //     .{ .x = 0.75, .y = 0, .z = 0, .r = 0, .g = 0, .b = 0.3, .u = 0.0, .v = 0.0 },
-    // };
-
-    const triangle = [_]Vertex{
-        .{ .x = -3.0, .y = 0.0, .z = -3.0, .r = 1.0, .g = 1.0, .b = 1.0, .u = 0.0, .v = 0.0 },
-        .{ .x = 3.0, .y = 0.0, .z = -3.0, .r = 1.0, .g = 1.0, .b = 1.0, .u = 1.0, .v = 0.0 },
-        .{ .x = -3.0, .y = 0.0, .z = 3.0, .r = 1.0, .g = 1.0, .b = 1.0, .u = 0.0, .v = 1.0 },
-
-        .{ .x = -3.0, .y = 0.0, .z = 3.0, .r = 1.0, .g = 1.0, .b = 1.0, .u = 0.0, .v = 1.0 },
-        .{ .x = 3.0, .y = 0.0, .z = -3.0, .r = 1.0, .g = 1.0, .b = 1.0, .u = 1.0, .v = 0.0 },
-        .{ .x = 3.0, .y = 0.0, .z = 3.0, .r = 1.0, .g = 1.0, .b = 1.0, .u = 1.0, .v = 1.0 },
-    };
-
-    const stagingInfo = try host.begin_stage_buffer(host.BufferCreateInfo{
-        .usage = .Vertex,
-        .element_size = format.stride,
-        .num_elements = triangle.len,
-        .dynamic_upload = false,
-        .texture_info = null,
-    });
-
-    var stagingBuffer = try host.map_stage_buffer(Vertex, stagingInfo);
-
-    @memcpy(stagingBuffer[0..triangle.len], triangle[0..]);
-
-    const tag = try copyPass.new_tag(name);
-    try copyPass.add_stage_buffer(stagingInfo, tag);
-
-    //return try host.submit_stage_buffer(host.GPUBuffer, &stagingInfo);
-}
 
 const UniformColor = extern struct {
     color: [4]f32,
@@ -156,20 +126,23 @@ pub fn main() !void {
                 },
             },
         },
+        assets.ResourceRequest{
+            .asset_name = "basic_plane",
+            .asset_source = "meshes/Monkey.rvb",
+            .type = .{
+                .mesh = .{ .vertex_count = undefined },
+            },
+        },
     });
 
-    var vertexFormat = host.VertexFormat.begin();
-    try vertexFormat.add(.Float3);
-    try vertexFormat.add(.Float3);
-    try vertexFormat.add(.Float2);
-
-    vertexFormat.display_format();
+    var format: host.VertexFormat = undefined;
+    assets.Vertex.fmt(&format);
 
     const pipelineInfo = host.PipelineConfig{
         .vertex_shader = scene.get(assets.Shader, "basic_vert") orelse unreachable,
         .fragment_shader = scene.get(assets.Shader, "basic_frag") orelse unreachable,
         .topology = .TriangleList,
-        .vertex_format = vertexFormat,
+        .vertex_format = format,
         .enable_depth_buffer = true,
         .enable_culling = false,
     };
@@ -177,21 +150,36 @@ pub fn main() !void {
     defer pipeline.free();
 
     var copyPass = host.CopyPass.init(host.MemAlloc);
-    try get_triangle_buffer(&copyPass, "triangle_buffer", vertexFormat);
-    //try upload_sprite(&copyPass, "dragon_eye", scene.get(assets.SoftwareTexture, "dragon_eye") orelse unreachable);
+    //try get_triangle_buffer(&copyPass, "triangle_buffer", vertexFormat);
 
     {
+        const plane_ref = scene.get_lookup_info("basic_plane") orelse unreachable;
+        std.debug.assert(plane_ref == .mesh);
+        const bufferInfo = host.BufferCreateInfo{
+            .dynamic_upload = false,
+            .element_size = @sizeOf(assets.Vertex),
+            .num_elements = @intCast(plane_ref.mesh.vertex_count),
+            .texture_info = null,
+            .usage = .Vertex,
+        };
+        _ = try scene.add_buffer_copy(.{
+            .source_name = "basic_plane",
+            .dest_name = "floor",
+            .info = bufferInfo,
+        }, &copyPass);
+
         const dreye_ref = scene.get(assets.SoftwareTexture, "dragon_eye") orelse unreachable;
 
-        _ = try scene.add_texture_to_copy_pass(.{
-            .name = "dragon_eye",
+        _ = try scene.add_texture_copy(.{
+            .source_name = "dragon_eye",
+            .dest_name = "gpu_dragon_eye",
             .info = .{
                 .address_policy = .Repeat,
                 .enable_mipmaps = false,
                 .width = dreye_ref.width,
                 .height = dreye_ref.height,
-                .mag_filter = .Nearest,
-                .min_filter = .Nearest,
+                .mag_filter = .Linear,
+                .min_filter = .Linear,
                 .mipmap_filter = .Nearest,
                 .texture_name = "dragon_eye",
             },
@@ -200,17 +188,14 @@ pub fn main() !void {
 
     try copyPass.submit();
 
-    try scene.obtain_texture_from_copy_pass(copyPass, "dragon_eye");
+    try scene.claim_copy_result(host.GPUTexture, copyPass, "gpu_dragon_eye");
+    try scene.claim_copy_result(host.GPUBuffer, copyPass, "floor");
 
-    const gpuBuffer = copyPass.get_result(host.GPUBuffer, copyPass.lookup_tag("triangle_buffer") orelse unreachable) orelse unreachable;
-    defer gpuBuffer.release();
-    const texture = scene.get(host.GPUTexture, "dragon_eye") orelse unreachable;
-    defer texture.release();
+    // we don't need to release the texture anymore becauser it's now owned by the scene.
+    const texture = scene.get(host.GPUTexture, "gpu_dragon_eye") orelse unreachable;
+    const gpuBuffer = scene.get(host.GPUBuffer, "floor") orelse unreachable;
 
-    // const gpuBuffer = try get_triangle_buffer(vertexFormat);
-    // defer gpuBuffer.release();
-    // const texture = try upload_sprite(scene.get(assets.SoftwareTexture, "dragon_eye") orelse unreachable);
-
+    copyPass.claim_ownership_of_results();
     scene.free_resource("basic_vert");
     scene.free_resource("basic_frag");
 

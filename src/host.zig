@@ -133,13 +133,13 @@ pub fn sdl_debug_error(msg: []const u8) anyerror {
 
 pub const VertexElement = enum(u32) {
     Float1 = 0,
-    Float2,
-    Float3,
-    Float4,
-    Int1,
-    Int2,
-    Int3,
-    Int4,
+    Float2 = 1,
+    Float3 = 2,
+    Float4 = 3,
+    Int1 = 4,
+    Int2 = 5,
+    Int3 = 6,
+    Int4 = 7,
 
     fn convert(this: @This()) c_uint {
         const types = [_]c_uint{
@@ -233,8 +233,13 @@ pub const VertexFormat = struct {
             .formats = &.{},
             .stride = 0,
         };
-        instance.formats = instance.formats_buffer[0..0];
+        instance.formats = &.{};
         return instance;
+    }
+
+    pub fn clear(this: *This) void {
+        this.formats = &.{};
+        this.stride = 0;
     }
 
     pub fn add(this: *This, element: VertexElement) !void {
@@ -245,8 +250,9 @@ pub const VertexFormat = struct {
         const offset = if (this.formats.len > 0) CALC: {
             break :CALC this.formats[this.formats.len - 1].offset + this.formats[this.formats.len - 1].type.size_bytes();
         } else 0;
-
+        std.debug.print("FMT Added: {} - Old Stride: {d} .. ", .{ element, this.stride });
         this.stride += element.size_bytes();
+        std.debug.print("New Stride: {d}\n", .{this.stride});
 
         this.formats_buffer[this.formats.len] = .{
             .type = element,
@@ -260,6 +266,8 @@ pub const VertexFormat = struct {
             std.debug.print("[ Empty Vertex Format ]\n", .{});
             return;
         }
+
+        std.debug.print("Count: {d} - ", .{this.formats.len});
 
         for (this.formats) |fmt| {
             std.debug.print("[ {s}@{d:02} ]", .{ fmt.type.element_name(), fmt.offset });
@@ -392,6 +400,7 @@ pub const Pipeline = struct {
 
         const view: [*]sdl.SDL_GPUVertexAttribute = @ptrCast(@alignCast(buffer));
 
+        config.vertex_format.display_format();
         for (config.vertex_format.formats, 0..) |element, idx| {
             view[idx] = .{
                 .location = @intCast(idx),
@@ -1138,19 +1147,6 @@ pub const CopyPass = struct {
                 }
             }
         }
-
-        // if (result.tag == tag) {
-        //     switch (result.value) {
-        //         .gpu_texture => |tex| {
-        //             std.debug.assert(T == GPUTexture);
-        //             return tex;
-        //         },
-        //         .gpu_buffer => |buf| {
-        //             std.debug.assert(T == GPUBuffer);
-        //             return buf;
-        //         },
-        //     }
-        // }
 
         return null;
     }

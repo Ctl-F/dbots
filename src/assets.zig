@@ -6,6 +6,10 @@ const stb = @cImport(@cInclude("stb_image.h"));
 
 const Module = @This();
 
+const obj = @import("obj.zig");
+
+pub const Vertex = obj.Vertex;
+
 pub const ASSET_FOLDER = switch (@import("builtin").mode) {
     .Debug => "zig-out/bin/assets/",
     else => "assets/",
@@ -37,12 +41,36 @@ pub fn read_file(allocator: std.mem.Allocator, filename: []const u8) ![]u8 {
     const path = try get_asset_path(allocator, filename);
     defer allocator.free(path);
 
+    return read_file_resolved(allocator, path);
+}
+
+pub fn read_file_options(
+    allocator: std.mem.Allocator,
+    filename: []const u8,
+    comptime alignment: u29,
+    comptime sentinel: ?u8,
+) !(if (sentinel) |s| [:s]align(alignment) u8 else []align(alignment) u8) {
+    const path = try get_asset_path(allocator, filename);
+    defer allocator.free(path);
+
+    return read_file_resolved_options(allocator, path, alignment, sentinel);
+}
+
+pub fn read_file_resolved(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
     const file = try std.fs.cwd().openFile(path, .{ .mode = .read_only });
     defer file.close();
 
     const stat = try file.stat();
 
     return try file.readToEndAlloc(allocator, stat.size);
+}
+
+pub fn read_file_resolved_options(allocator: std.mem.Allocator, filename: []const u8, comptime alignment: u29, comptime sentinel: ?u8) !(if (sentinel) |s| [:s]align(alignment) u8 else []align(alignment) u8) {
+    const file = try std.fs.cwd().openFile(filename, .{ .mode = .read_only });
+    defer file.close();
+
+    const stat = try file.stat();
+    return try file.readToEndAllocOptions(allocator, stat.size, stat.size, alignment, sentinel);
 }
 
 pub const Shader = struct {
@@ -160,9 +188,14 @@ pub const ResourceType = union(enum) {
     raw: Raw,
     shader: ShaderRes,
     texture: Texture,
+    mesh: Mesh,
     gpu_texture: GPUTexture,
+    gpu_buffer: GPUBuffer,
 
     pub const Raw = struct {};
+    pub const Mesh = struct {
+        vertex_count: usize,
+    };
     pub const ShaderRes = struct {
         stage: Shader.Stage,
         resources: Shader.ResourceConfig,
@@ -171,6 +204,7 @@ pub const ResourceType = union(enum) {
         vflip: bool,
     };
     pub const GPUTexture = struct {};
+    pub const GPUBuffer = struct {};
 };
 
 pub const ResourceRequest = struct {
@@ -197,6 +231,7 @@ pub const SceneResources = struct {
     texture_sources: std.AutoHashMap(usize, SoftwareTexture),
     textures: std.AutoHashMap(usize, host.GPUTexture),
     binaries: std.AutoHashMap(usize, RawBuffer),
+    buffers: std.AutoHashMap(usize, host.GPUBuffer),
     allocator: std.mem.Allocator,
     id_counter: usize,
 
@@ -208,6 +243,7 @@ pub const SceneResources = struct {
             .texture_sources = std.AutoHashMap(usize, SoftwareTexture).init(allocator),
             .textures = std.AutoHashMap(usize, host.GPUTexture).init(allocator),
             .binaries = std.AutoHashMap(usize, RawBuffer).init(allocator),
+            .buffers = std.AutoHashMap(usize, host.GPUBuffer).init(allocator),
             .id_counter = 0,
         };
     }
@@ -229,7 +265,7 @@ pub const SceneResources = struct {
 
     inline fn assert_valid_type(comptime T: type, resource_type: ResourceType) void {
         switch (resource_type) {
-            .raw => if (T != RawBuffer) {
+            .raw, .mesh => if (T != RawBuffer) {
                 std.debug.print("Incorrect resource type requested: {s} expected RawBuffer\n", .{@typeName(T)});
                 unreachable;
             },
@@ -245,7 +281,16 @@ pub const SceneResources = struct {
                 std.debug.print("Incorrect resource type requested: {s} expected GPUTexture\n", .{@typeName(T)});
                 unreachable;
             },
+            .gpu_buffer => if (T != host.GPUBuffer) {
+                std.debug.print("Incorrect resource type requested: {s} expected GPUBuffer\n", .{@typeName(T)});
+                unreachable;
+            },
         }
+    }
+
+    pub fn get_lookup_info(this: *This, key: []const u8) ?ResourceType {
+        const lookup = this.lookup.get(key) orelse return null;
+        return lookup.resource_type;
     }
 
     pub fn get_ptr(this: *This, comptime T: type, key: []const u8) ?*T {
@@ -257,7 +302,10 @@ pub const SceneResources = struct {
             Shader => this.shaders.getPtr(lookup.index),
             SoftwareTexture => this.texture_sources.getPtr(lookup.index),
             host.GPUTexture => this.textures.getPtr(lookup.index),
-            else => unreachable,
+            host.GPUBuffer => this.buffers.getPtr(lookup.index),
+            else => {
+                @compileError("Unexpected type: " ++ @typeName(T));
+            },
         };
     }
 
@@ -266,6 +314,9 @@ pub const SceneResources = struct {
             .raw => {
                 return this.load_resource_raw(request);
             },
+            .mesh => {
+                return this.load_resource_obj(request);
+            },
             .shader => |s| {
                 return this.load_resource_shader(request, s);
             },
@@ -273,8 +324,11 @@ pub const SceneResources = struct {
                 return this.load_resource_texture(request, t);
             },
             .gpu_texture => {
-                std.debug.print("GPU Texture is not a valid resource request. Must be created via texture_convert\n", .{});
+                std.debug.print("GPU Texture is not a valid resource request. Must be created via texture conversion\n", .{});
                 unreachable;
+            },
+            .gpu_buffer => {
+                std.debug.print("Loading GPUBuffers directly is not a valid resource request. Must be created via buffer conversion\n", .{});
             },
         }
     }
@@ -287,18 +341,7 @@ pub const SceneResources = struct {
         const texture = try SoftwareTexture.load(request.asset_source, textureRes.vflip);
         errdefer texture.release();
 
-        this.id_counter += 1;
-        const index = this.id_counter;
-
-        try this.texture_sources.put(index, texture);
-        errdefer _ = this.texture_sources.remove(index);
-
-        const node = ResourceLookupNode{
-            .index = index,
-            .resource_name = request.asset_name,
-            .resource_type = request.type,
-        };
-        try this.lookup.put(request.asset_name, node);
+        try this.insert_resource(SoftwareTexture, texture, request.asset_name, request.type);
     }
 
     fn load_resource_shader(this: *This, request: ResourceRequest, shaderRes: ResourceType.ShaderRes) !void {
@@ -309,18 +352,7 @@ pub const SceneResources = struct {
         var shader = try Shader.load(this.allocator, request.asset_source, shaderRes.stage, shaderRes.resources);
         errdefer shader.release();
 
-        this.id_counter += 1;
-        const index = this.id_counter;
-
-        try this.shaders.put(index, shader);
-        errdefer _ = this.shaders.remove(index);
-
-        const node = ResourceLookupNode{
-            .index = index,
-            .resource_name = request.asset_name,
-            .resource_type = request.type,
-        };
-        try this.lookup.put(request.asset_name, node);
+        try this.insert_resource(Shader, shader, request.asset_name, request.type);
     }
 
     fn load_resource_raw(this: *This, request: ResourceRequest) !void {
@@ -331,28 +363,68 @@ pub const SceneResources = struct {
         const data = try Module.read_file(this.allocator, request.asset_source);
         errdefer this.allocator.free(data);
 
+        try this.insert_resource(RawBuffer, .{ .buffer = data }, request.asset_name, request.type);
+    }
+
+    fn load_resource_obj(this: *This, request: ResourceRequest) !void {
+        if (this.lookup.contains(request.asset_name)) {
+            return error.ResourceDoubleLoad;
+        }
+
+        const data = try Module.read_file_options(this.allocator, request.asset_source, @alignOf(u32), null);
+        defer this.allocator.free(data);
+
+        const vertices = try obj.load_mesh(host.MemAlloc, data);
+
+        try this.insert_resource(RawBuffer, .{
+            .buffer = @ptrCast(vertices),
+        }, request.asset_name, .{
+            .mesh = .{
+                .vertex_count = vertices.len,
+            },
+        });
+    }
+
+    fn insert_resource(this: *This, comptime T: type, item: T, name: []const u8, resType: ResourceType) !void {
         this.id_counter += 1;
         const index = this.id_counter;
 
-        try this.binaries.put(index, .{
-            .buffer = data,
-        });
-        errdefer _ = this.binaries.remove(index);
+        const list = switch (T) {
+            RawBuffer => &this.binaries,
+            Shader => &this.shaders,
+            SoftwareTexture => &this.texture_sources,
+            host.GPUTexture => &this.textures,
+            host.GPUBuffer => &this.buffers,
+            else => @compileError("Asset type: " ++ @typeName(T) ++ " is not supported"),
+        };
+
+        std.debug.assert(!this.lookup.contains(name));
+        std.debug.assert(!list.contains(index));
+
+        try list.put(index, item);
+        errdefer _ = list.remove(index);
 
         const node = ResourceLookupNode{
             .index = index,
-            .resource_name = request.asset_name,
-            .resource_type = request.type,
+            .resource_name = name,
+            .resource_type = resType,
         };
-        try this.lookup.put(request.asset_name, node);
+        try this.lookup.put(name, node);
     }
 
     pub const TextureUploadInfo = struct {
-        name: []const u8,
+        source_name: []const u8,
+        dest_name: []const u8,
         info: host.GPUSamplerInfo,
     };
 
-    pub fn add_texture_to_copy_pass(this: *This, texture: TextureUploadInfo, copyPass: *host.CopyPass) !host.CopyPass.tag_t {
+    pub const BufferUploadInfo = struct {
+        source_name: []const u8,
+        dest_name: []const u8,
+        info: host.BufferCreateInfo,
+    };
+
+    pub fn add_texture_copy(this: *This, texture: TextureUploadInfo, copyPass: *host.CopyPass) !host.CopyPass.tag_t {
         const config = host.BufferCreateInfo{
             .dynamic_upload = false,
             .element_size = undefined,
@@ -361,7 +433,7 @@ pub const SceneResources = struct {
             .usage = .Sampler,
         };
 
-        const swTexture = this.get(SoftwareTexture, texture.name) orelse return error.InvalidAssetName;
+        const swTexture = this.get(SoftwareTexture, texture.source_name) orelse return error.InvalidAssetName;
 
         const stage = try host.begin_stage_buffer(config);
         const buffer = try host.map_stage_buffer(u8, stage);
@@ -369,31 +441,51 @@ pub const SceneResources = struct {
         const view = buffer[0..size];
         @memcpy(view, @as([*c]const u8, @ptrCast(@alignCast(swTexture.pixels)))[0..size]);
 
-        const tag = try copyPass.new_tag(texture.name);
+        const tag = try copyPass.new_tag(texture.dest_name);
         try copyPass.add_stage_buffer(stage, tag);
 
         return tag;
     }
 
-    pub fn obtain_texture_from_copy_pass(this: *This, copyPass: host.CopyPass, name: []const u8) !void {
-        const tag = copyPass.lookup_tag(name) orelse return error.InvalidAssetName;
-        const texture = copyPass.get_result(host.GPUTexture, tag) orelse unreachable;
-        std.debug.assert(!this.textures.contains(name));
-        try this.textures.put(name, texture);
+    pub fn add_buffer_copy(this: *This, info: BufferUploadInfo, copyPass: *host.CopyPass) !host.CopyPass.tag_t {
+        const binary = this.get(RawBuffer, info.source_name) orelse return error.InvalidAssetName;
+
+        const stage = try host.begin_stage_buffer(info.info);
+        const buffer = try host.map_stage_buffer(u8, stage);
+        const view = buffer[0..binary.buffer.len];
+        @memcpy(view, binary.buffer);
+
+        const tag = try copyPass.new_tag(info.dest_name);
+        try copyPass.add_stage_buffer(stage, tag);
+
+        return tag;
     }
 
-    fn assert_asset_exists(this: This, comptime T: type, name: []const u8) void {
+    pub fn claim_copy_result(this: *This, comptime T: type, copyPass: host.CopyPass, name: []const u8) !void {
+        const tag = copyPass.lookup_tag(name) orelse return error.InvalidAssetName;
+        const result = copyPass.get_result(T, tag) orelse unreachable;
+        errdefer result.release();
+
+        const info = switch (T) {
+            host.GPUTexture => ResourceType{ .gpu_texture = .{} },
+            host.GPUBuffer => ResourceType{ .gpu_buffer = .{} },
+            else => @compileError("Received type `" ++ @typeName(T) ++ "` not allowed as a copy result"),
+        };
+
+        try this.insert_resource(T, result, name, info);
+    }
+
+    pub fn assert_asset_exists(this: This, comptime T: type, name: []const u8) void {
         const lookup = this.lookup.get(name) orelse unreachable;
         switch (T) {
-            RawBuffer => std.debug.assert(lookup.resource_type == .raw),
+            RawBuffer => std.debug.assert(lookup.resource_type == .raw or lookup.resource_type == .mesh),
             Shader => std.debug.assert(lookup.resource_type == .shader),
             SoftwareTexture => std.debug.assert(lookup.resource_type == .texture),
             host.GPUTexture => std.debug.assert(lookup.resource_type == .gpu_texture),
+            host.GPUBuffer => std.debug.assert(lookup.resource_type == .gpu_buffer),
             else => unreachable,
-        }// TODO: Fix this -- the current limitation is that only one resource can have a name between all types.
-    }   // the logic implemented here assumes resources can have the same name of different types (false)
-        // and also ignores the lookup table entirely. This needs to be fixed and a good naming system(auto-naming-system?)
-        // needs to be implemented
+        }
+    }
 
     pub fn convert_textures(this: *This, textures: []const TextureUploadInfo) !void {
         std.debug.assert(textures.len <= host.CopyPass.BATCH_SIZE);
@@ -415,9 +507,7 @@ pub const SceneResources = struct {
             // and we have (theoretically) successfully submitted the copyPass.
             const gtexture = copyPass.get_result(host.GPUTexture, tags[idx]) orelse unreachable;
 
-            this.assert_asset_exists(this: This, comptime T: type, name: []const u8)
-
-            try this.textures.put(textures[idx].name, gtexture);
+            try this.insert_resource(host.GPUTexture, gtexture, textures[idx].dest_name, .{ .gpu_texture = .{} });
         }
         copyPass.claim_ownership_of_results();
     }
@@ -430,6 +520,12 @@ pub const SceneResources = struct {
                 .raw => {
                     const buffer = this.binaries.get(node.index) orelse unreachable;
                     this.allocator.free(buffer.buffer);
+                    _ = this.binaries.remove(node.index);
+                },
+                .mesh => |m| {
+                    const buffer = this.binaries.get(node.index) orelse unreachable;
+                    const correct_view: []Vertex = @as([*]Vertex, @ptrCast(@alignCast(buffer.buffer.ptr)))[0..m.vertex_count];
+                    this.allocator.free(correct_view);
                     _ = this.binaries.remove(node.index);
                 },
                 .texture => {
@@ -446,6 +542,11 @@ pub const SceneResources = struct {
                     var texture = this.textures.get(node.index) orelse unreachable;
                     texture.release();
                     _ = this.textures.remove(node.index);
+                },
+                .gpu_buffer => {
+                    var buffer = this.buffers.get(node.index) orelse unreachable;
+                    buffer.release();
+                    _ = this.buffers.remove(node.index);
                 },
             }
 
