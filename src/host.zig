@@ -66,6 +66,11 @@ pub fn init(options: InitOptions) !void {
     }
     errdefer sdl.SDL_Quit();
 
+    if (!sdl.TTF_Init()) {
+        return sdl_debug_error("ttf");
+    }
+    errdefer sdl.TTF_Quit();
+
     windowptr = sdl.SDL_CreateWindow(options.title, @intCast(options.display.width), @intCast(options.display.height), sdl.SDL_WINDOW_VULKAN);
     if (windowptr == null) {
         return sdl_debug_error("wincreate");
@@ -100,6 +105,7 @@ pub fn deinit() void {
     sdl.SDL_ReleaseWindowFromGPUDevice(gpu_device, windowptr);
     sdl.SDL_DestroyGPUDevice(gpu_device);
     sdl.SDL_DestroyWindow(windowptr);
+    sdl.TTF_Quit();
     sdl.SDL_Quit();
 }
 
@@ -228,7 +234,7 @@ pub const VertexFormat = struct {
     formats: []VertexFormatSpecifier,
     stride: u32,
 
-    pub fn begin() This {ned
+    pub fn begin() This {
         var instance = This{
             .formats_buffer = undefined,
             .formats = &.{},
