@@ -238,6 +238,91 @@ pub const RawBuffer = struct {
     buffer: []u8,
 };
 
+pub const DefaultAssets = struct {
+    pub const Quad = "_DefaultQuad_";
+    pub const CheckerBoard = "_CheckerBoardTex_";
+
+    pub fn make_default(scene: *SceneResources) !void {
+        var copyPass = host.CopyPass.init(host.MemAlloc);
+        defer copyPass.deinit();
+
+        const quad_tag = try make_default_quad(&copyPass);
+        const checkerboard = try make_default_checkerboard(&copyPass);
+
+        try copyPass.submit();
+
+        const quadBuffer = copyPass.get_result(GPUBuffer, quad_tag) orelse return error.NullAssetResult;
+        _ = try scene.insert_resource(GPUBuffer, quadBuffer, Quad, .{ .gpu_buffer = .{} });
+        errdefer scene.free_resource(Quad);
+
+        const checkerTexture = copyPass.get_result(GPUTexture, checkerboard) orelse return error.NullAssetResult;
+        _ = try scene.insert_resource(GPUTexture, checkerTexture, CheckerBoard, .{ .gpu_texture = .{} });
+    }
+
+    fn make_default_quad(copyPass: *host.CopyPass) !host.CopyPass.tag_t {
+        const normal: [3]f32 = .{ 0.0, 0.0, 1.0 };
+        const color: [3]f32 = .{ 1.0, 1.0, 1.0 };
+
+        const quad = [_]Vertex{
+            .{ .position = .{ -0.5, -0.5, 0.0 }, .normal = normal, .uv = .{ 0.0, 0.0 }, .color = color },
+            .{ .position = .{ 0.5, -0.5, 0.0 }, .normal = normal, .uv = .{ 1.0, 0.0 }, .color = color },
+            .{ .position = .{ -0.5, 0.5, 0.0 }, .normal = normal, .uv = .{ 0.0, 1.0 }, .color = color },
+
+            .{ .position = .{ -0.5, 0.5, 0.0 }, .normal = normal, .uv = .{ 0.0, 1.0 }, .color = color },
+            .{ .position = .{ 0.5, -0.5, 0.0 }, .normal = normal, .uv = .{ 1.0, 0.0 }, .color = color },
+            .{ .position = .{ 0.5, 0.5, 0.0 }, .normal = normal, .uv = .{ 1.0, 1.0 }, .color = color },
+        };
+
+        const bufferInfo = host.BufferCreateInfo{
+            .dynamic_upload = false,
+            .element_size = @sizeOf(Vertex),
+            .num_elements = quad.len,
+            .texture_info = null,
+            .usage = .Vertex,
+        };
+        const stageInfo = try host.begin_stage_buffer(bufferInfo);
+        const buffer = try host.map_stage_buffer(Vertex, stageInfo);
+        @memcpy(buffer[0..quad.len], &quad);
+
+        const tag = try copyPass.new_tag(Quad);
+        copyPass.add_stage_buffer(stageInfo, tag);
+
+        return tag;
+    }
+
+    fn make_default_checkerboard(scene: *SceneResources) !void {
+        const pixelData = [_]u8{
+            255, 0, 0, 255, 0,   0, 0, 255,
+            0,   0, 0, 255, 255, 0, 0, 255,
+        };
+        const w: u32 = 2;
+        const h: u32 = 2;
+
+        const textureInfo = host.BufferCreateInfo{
+            .dynamic_upload = false,
+            .element_size = undefined,
+            .num_elements = undefined,
+            .texture_info = .{
+                .width = w,
+                .height = h,
+                .address_policy = .Repeat,
+                .enable_mipmaps = false,
+                .mag_filter = .Nearest,
+                .min_filter = .Nearest,
+                .mipmap_filter = .Nearest,
+                .texture_name = "CheckerBoard",
+            },
+            .usage = .Sampler,
+        };
+
+        const stageInfo = try host.begin_stage_buffer(textureInfo);
+        const buffer = try host.map_stage_buffer(u8, stageInfo);
+        @memcpy(buffer[0..pixelData.len], &pixelData);
+
+        const tag = copyPass.new_tag(); //TODO
+    }
+};
+
 pub const SceneResources = struct {
     const This = @This();
     pub const key_t = usize;
@@ -264,6 +349,10 @@ pub const SceneResources = struct {
             .fonts = std.AutoHashMap(key_t, Font).init(allocator),
             .id_counter = 0,
         };
+    }
+
+    pub fn build_default_assets(this: *This) !void {
+        try DefaultAssets.make_default(this);
     }
 
     pub fn load(this: *This, assets: []const ResourceRequest) !void {
@@ -324,6 +413,10 @@ pub const SceneResources = struct {
         return null;
     }
 
+    pub fn get_lookup_node_by_name(this: *This, name: []const u8) ?ResourceLookupNode {
+        return this.lookup.get(name);
+    }
+
     pub fn get_ptr(this: *This, comptime T: type, key: []const u8) ?*T {
         const lookup = this.lookup.get(key) orelse return null;
         assert_valid_type(T, lookup.resource_type);
@@ -341,7 +434,7 @@ pub const SceneResources = struct {
         };
     }
 
-    fn load_resource(this: *This, request: ResourceRequest) !void {
+    fn load_resource(this: *This, request: ResourceRequest) !key_t {
         switch (request.type) {
             .raw => {
                 return this.load_resource_raw(request);
@@ -364,11 +457,12 @@ pub const SceneResources = struct {
             },
             .gpu_buffer => {
                 std.debug.print("Loading GPUBuffers directly is not a valid resource request. Must be created via buffer conversion\n", .{});
+                unreachable;
             },
         }
     }
 
-    fn load_font(this: *This, request: ResourceRequest, fontRes: ResourceType.TFont) !void {
+    fn load_font(this: *This, request: ResourceRequest, fontRes: ResourceType.TFont) !key_t {
         if (this.lookup.contains(request.asset_name)) {
             return error.ResourceDoubleLoad;
         }
@@ -386,10 +480,10 @@ pub const SceneResources = struct {
             return error.FontLoadFailure;
         }
 
-        try this.insert_resource(Font, Font{ .handle = font, .size = fontRes.size }, request.asset_name, fontRes);
+        return try this.insert_resource(Font, Font{ .handle = font, .size = fontRes.size }, request.asset_name, fontRes);
     }
 
-    fn load_resource_texture(this: *This, request: ResourceRequest, textureRes: ResourceType.Texture) !void {
+    fn load_resource_texture(this: *This, request: ResourceRequest, textureRes: ResourceType.Texture) !key_t {
         if (this.lookup.contains(request.asset_name)) {
             return error.ResourceDoubleLoad;
         }
@@ -397,10 +491,10 @@ pub const SceneResources = struct {
         const texture = try SoftwareTexture.load(request.asset_source, textureRes.vflip);
         errdefer texture.release();
 
-        try this.insert_resource(SoftwareTexture, texture, request.asset_name, request.type);
+        return try this.insert_resource(SoftwareTexture, texture, request.asset_name, request.type);
     }
 
-    fn load_resource_shader(this: *This, request: ResourceRequest, shaderRes: ResourceType.ShaderRes) !void {
+    fn load_resource_shader(this: *This, request: ResourceRequest, shaderRes: ResourceType.ShaderRes) !key_t {
         if (this.lookup.contains(request.asset_name)) {
             return error.ResourceDoubleLoad;
         }
@@ -408,10 +502,10 @@ pub const SceneResources = struct {
         var shader = try Shader.load(this.allocator, request.asset_source, shaderRes.stage, shaderRes.resources);
         errdefer shader.release();
 
-        try this.insert_resource(Shader, shader, request.asset_name, request.type);
+        return try this.insert_resource(Shader, shader, request.asset_name, request.type);
     }
 
-    fn load_resource_raw(this: *This, request: ResourceRequest) !void {
+    fn load_resource_raw(this: *This, request: ResourceRequest) !key_t {
         if (this.lookup.contains(request.asset_name)) {
             return error.ResourceDoubleLoad;
         }
@@ -419,10 +513,10 @@ pub const SceneResources = struct {
         const data = try Module.read_file(this.allocator, request.asset_source);
         errdefer this.allocator.free(data);
 
-        try this.insert_resource(RawBuffer, .{ .buffer = data }, request.asset_name, request.type);
+        return try this.insert_resource(RawBuffer, .{ .buffer = data }, request.asset_name, request.type);
     }
 
-    fn load_resource_obj(this: *This, request: ResourceRequest) !void {
+    fn load_resource_obj(this: *This, request: ResourceRequest) !key_t {
         if (this.lookup.contains(request.asset_name)) {
             return error.ResourceDoubleLoad;
         }
@@ -432,7 +526,7 @@ pub const SceneResources = struct {
 
         const vertices = try obj.load_mesh(host.MemAlloc, data);
 
-        try this.insert_resource(RawBuffer, .{
+        return try this.insert_resource(RawBuffer, .{
             .buffer = @ptrCast(vertices),
         }, request.asset_name, .{
             .mesh = .{
@@ -441,9 +535,13 @@ pub const SceneResources = struct {
         });
     }
 
-    fn insert_resource(this: *This, comptime T: type, item: T, name: []const u8, resType: ResourceType) !void {
+    pub fn next_key(this: *This) key_t {
         this.id_counter += 1;
-        const index = this.id_counter;
+        return this.id_counter;
+    }
+
+    pub fn insert_resource(this: *This, comptime T: type, item: T, name: []const u8, resType: ResourceType) !key_t {
+        const index = this.next_key();
 
         const list = switch (T) {
             RawBuffer => &this.binaries,
@@ -467,6 +565,8 @@ pub const SceneResources = struct {
             .resource_type = resType,
         };
         try this.lookup.put(name, node);
+
+        return index;
     }
 
     pub const TextureUploadInfo = struct {
