@@ -238,7 +238,7 @@ pub const RawBuffer = struct {
     buffer: []u8,
 };
 
-pub const DefaultAssets = struct {
+pub const Default = struct {
     pub const Quad = "_DefaultQuad_";
     pub const CheckerBoard = "_CheckerBoardTex_";
 
@@ -257,6 +257,9 @@ pub const DefaultAssets = struct {
 
         const checkerTexture = copyPass.get_result(GPUTexture, checkerboard) orelse return error.NullAssetResult;
         _ = try scene.insert_resource(GPUTexture, checkerTexture, CheckerBoard, .{ .gpu_texture = .{} });
+
+        // this is important so that we don't accidentally drop results we didn't mean to.
+        copyPass.claim_ownership_of_results();
     }
 
     fn make_default_quad(copyPass: *host.CopyPass) !host.CopyPass.tag_t {
@@ -285,18 +288,20 @@ pub const DefaultAssets = struct {
         @memcpy(buffer[0..quad.len], &quad);
 
         const tag = try copyPass.new_tag(Quad);
-        copyPass.add_stage_buffer(stageInfo, tag);
+        try copyPass.add_stage_buffer(stageInfo, tag);
 
         return tag;
     }
 
-    fn make_default_checkerboard(scene: *SceneResources) !void {
+    fn make_default_checkerboard(copyPass: *host.CopyPass) !host.CopyPass.tag_t {
         const pixelData = [_]u8{
-            255, 0, 0, 255, 0,   0, 0, 255,
-            0,   0, 0, 255, 255, 0, 0, 255,
+            255, 0, 0,   255, 255, 0, 255, 255, 255, 0, 0,   255, 255, 0, 255, 255,
+            255, 0, 255, 255, 255, 0, 0,   255, 255, 0, 255, 255, 255, 0, 0,   255,
+            255, 0, 0,   255, 255, 0, 255, 255, 255, 0, 0,   255, 255, 0, 255, 255,
+            255, 0, 255, 255, 255, 0, 0,   255, 255, 0, 255, 255, 255, 0, 0,   255,
         };
-        const w: u32 = 2;
-        const h: u32 = 2;
+        const w: u32 = 4;
+        const h: u32 = 4;
 
         const textureInfo = host.BufferCreateInfo{
             .dynamic_upload = false,
@@ -319,7 +324,10 @@ pub const DefaultAssets = struct {
         const buffer = try host.map_stage_buffer(u8, stageInfo);
         @memcpy(buffer[0..pixelData.len], &pixelData);
 
-        const tag = copyPass.new_tag(); //TODO
+        const tag = try copyPass.new_tag(CheckerBoard);
+        try copyPass.add_stage_buffer(stageInfo, tag);
+
+        return tag;
     }
 };
 
@@ -352,12 +360,12 @@ pub const SceneResources = struct {
     }
 
     pub fn build_default_assets(this: *This) !void {
-        try DefaultAssets.make_default(this);
+        try Default.make_default(this);
     }
 
     pub fn load(this: *This, assets: []const ResourceRequest) !void {
         for (assets) |request| { // TODO: Multi-thead if assets.len is larger than a threshold
-            try this.load_resource(request);
+            _ = try this.load_resource(request);
             errdefer this.free_resource(request.asset_name);
         }
     }
@@ -480,7 +488,7 @@ pub const SceneResources = struct {
             return error.FontLoadFailure;
         }
 
-        return try this.insert_resource(Font, Font{ .handle = font, .size = fontRes.size }, request.asset_name, fontRes);
+        return try this.insert_resource(Font, Font{ .handle = font, .size = fontRes.size }, request.asset_name, request.type);
     }
 
     fn load_resource_texture(this: *This, request: ResourceRequest, textureRes: ResourceType.Texture) !key_t {
@@ -629,7 +637,7 @@ pub const SceneResources = struct {
             else => @compileError("Received type `" ++ @typeName(T) ++ "` not allowed as a copy result"),
         };
 
-        try this.insert_resource(T, result, name, info);
+        _ = try this.insert_resource(T, result, name, info);
     }
 
     pub fn assert_asset_exists(this: This, comptime T: type, name: []const u8) void {

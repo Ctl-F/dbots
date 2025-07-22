@@ -91,9 +91,11 @@ pub fn main() !void {
     const pipeline = try host.Pipeline.init(pipelineInfo);
     defer pipeline.free();
 
-    var copyPass = host.CopyPass.init(host.MemAlloc);
-
+    try scene.build_default_assets();
     {
+        var copyPass = host.CopyPass.init(host.MemAlloc);
+        defer copyPass.deinit();
+
         const plane_ref = scene.get_lookup_info("basic_plane") orelse unreachable;
         std.debug.assert(plane_ref == .mesh);
         const bufferInfo = host.BufferCreateInfo{
@@ -125,18 +127,28 @@ pub fn main() !void {
                 .texture_name = "dragon_eye",
             },
         }, &copyPass);
+
+        try copyPass.submit();
+
+        try scene.claim_copy_result(host.GPUTexture, copyPass, "gpu_dragon_eye");
+        try scene.claim_copy_result(host.GPUBuffer, copyPass, "floor");
+
+        copyPass.claim_ownership_of_results();
     }
 
-    try copyPass.submit();
-
-    try scene.claim_copy_result(host.GPUTexture, copyPass, "gpu_dragon_eye");
-    try scene.claim_copy_result(host.GPUBuffer, copyPass, "floor");
-
     // we don't need to release the texture anymore becauser it's now owned by the scene.
-    const texture = scene.get(host.GPUTexture, "gpu_dragon_eye") orelse unreachable;
+    //const texture = scene.get(host.GPUTexture, "gpu_dragon_eye") orelse unreachable;
+
+    const textures = [_]host.GPUTexture{
+        scene.get(host.GPUTexture, "gpu_dragon_eye") orelse unreachable,
+        scene.get(host.GPUTexture, assets.Default.CheckerBoard) orelse unreachable,
+    };
+
+    const quad = scene.get(host.GPUBuffer, assets.Default.Quad) orelse unreachable;
+    const quad_transform = math.mat4.mul(math.mat4.fromTranslate(math.vec3.new(0, -1, 3)), math.mat4.fromRotation(90, math.vec3.new(1, 0, 0)));
+
     const gpuBuffer = scene.get(host.GPUBuffer, "floor") orelse unreachable;
 
-    copyPass.claim_ownership_of_results();
     scene.free_resource("basic_vert");
     scene.free_resource("basic_frag");
 
@@ -147,6 +159,12 @@ pub fn main() !void {
         .projection = math.mat4.perspectiveReversedZ(60.0, @as(f32, @floatFromInt(options.display.width)) / @as(f32, @floatFromInt(options.display.height)), 0.01),
         .view = math.mat4.lookAt(math.vec3.new(0, 2, 3), math.vec3.zero(), math.vec3.up()),
         .model = math.mat4.identity(),
+    };
+
+    var uni_transform: UniformTransform = .{
+        .projection = transform.projection,
+        .view = transform.view,
+        .model = quad_transform,
     };
 
     host.input_mode(.Keyboard);
@@ -161,20 +179,31 @@ pub fn main() !void {
         angle_y += input.mouse_x_rel * 0.01;
         angle_x -= input.mouse_y_rel * 0.01;
 
-        transform.view = math.mat4.lookAt(math.vec3.new(0, 2, 3), math.vec3.zero(), math.vec3.up());
+        transform.view = math.mat4.lookAt(math.vec3.new(0, 1, -3), math.vec3.zero(), math.vec3.up());
+        uni_transform.view = transform.view;
 
         if (input.action_just_pressed(.Pause)) {
             break :app;
         }
 
+        const index: usize = @intFromBool(input.action_pressed(.Jump));
+
         var renderPass = try pipeline.begin(.{ 0.0, 0.0, 0.0, 1.0 });
         pipeline.bind_uniform_buffer(renderPass, &color, @sizeOf(UniformColor), .Fragment, 0);
         pipeline.bind_uniform_buffer(renderPass, &transform, @sizeOf(UniformTransform), .Vertex, 0);
-        try pipeline.bind_texture(&renderPass, texture);
+        try pipeline.bind_texture(&renderPass, textures[index]);
         pipeline.bind_vertex_buffer(&renderPass, gpuBuffer);
+
+        pipeline.bind_uniform_buffer(renderPass, &uni_transform, @sizeOf(UniformTransform), .Vertex, 0);
+        try pipeline.bind_texture(&renderPass, textures[1]);
+        pipeline.bind_vertex_buffer(&renderPass, quad);
+
         try pipeline.end(renderPass);
     }
 }
+
+// TODO: Finish text rendering
+// TODO: Test Camera (formaize camera)
 
 // TODO: multi-thread asset loading
 // TODO: Sound asset type
