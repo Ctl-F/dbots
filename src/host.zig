@@ -257,9 +257,7 @@ pub const VertexFormat = struct {
         const offset = if (this.formats.len > 0) CALC: {
             break :CALC this.formats[this.formats.len - 1].offset + this.formats[this.formats.len - 1].type.size_bytes();
         } else 0;
-        std.debug.print("FMT Added: {} - Old Stride: {d} .. ", .{ element, this.stride });
         this.stride += element.size_bytes();
-        std.debug.print("New Stride: {d}\n", .{this.stride});
 
         this.formats_buffer[this.formats.len] = .{
             .type = element,
@@ -431,7 +429,13 @@ pub const Pipeline = struct {
         return error.FailedToCreatePipeline;
     }
 
-    pub fn begin(this: This, clearColor: @Vector(4, f32)) !RenderPass {
+    pub const RenderPassLoadOp = union(enum) {
+        Clear: @Vector(4, f32),
+        Load,
+        DontCare,
+    };
+
+    pub fn begin(this: This, loadOp: RenderPassLoadOp, depthLoadOp: ?RenderPassLoadOp) !RenderPass {
         var renderPass = RenderPass{
             .command_buffer = null,
             .render_pass = null,
@@ -444,25 +448,43 @@ pub const Pipeline = struct {
         if (renderPass.command_buffer == null) {
             return error.UnableToObtainCommandBuffer;
         }
-        //std.debug.print("Acquired Command buffer\n", .{});
 
         if (!sdl.SDL_WaitAndAcquireGPUSwapchainTexture(renderPass.command_buffer, windowptr, &renderPass.swapchain_texture, null, null)) {
             return error.UnableToObtainSwapchainTexture;
         }
-        //std.debug.print("Obtained swapchain texture.\n", .{});
 
         var colorTargetInfo = std.mem.zeroes(sdl.SDL_GPUColorTargetInfo);
         colorTargetInfo.texture = renderPass.swapchain_texture;
-        colorTargetInfo.clear_color = sdl.SDL_FColor{ .r = clearColor[0], .g = clearColor[1], .b = clearColor[2], .a = clearColor[3] };
-        colorTargetInfo.load_op = sdl.SDL_GPU_LOADOP_CLEAR;
         colorTargetInfo.store_op = sdl.SDL_GPU_STOREOP_STORE;
 
-        const depthTargetInfo: ?sdl.SDL_GPUDepthStencilTargetInfo = if (this.depth_texture != null) RES: {
+        switch (loadOp) {
+            .Clear => |clearColor| {
+                colorTargetInfo.load_op = sdl.SDL_GPU_LOADOP_CLEAR;
+                colorTargetInfo.clear_color = sdl.SDL_FColor{ .r = clearColor[0], .g = clearColor[1], .b = clearColor[2], .a = clearColor[3] };
+            },
+            .Load => {
+                colorTargetInfo.load_op = sdl.SDL_GPU_LOADOP_LOAD;
+            },
+            .DontCare => {
+                colorTargetInfo.load_op = sdl.SDL_GPU_LOADOP_DONT_CARE;
+            },
+        }
+
+        var depthTargetInfo: ?sdl.SDL_GPUDepthStencilTargetInfo = if (this.depth_texture != null) RES: {
             var dti = std.mem.zeroes(sdl.SDL_GPUDepthStencilTargetInfo);
             dti.texture = this.depth_texture;
             dti.clear_depth = 1.0;
             dti.clear_stencil = 0;
-            dti.load_op = sdl.SDL_GPU_LOADOP_CLEAR;
+            dti.load_op = load_op: {
+                if (depthLoadOp) |dlo| {
+                    switch (dlo) {
+                        .Clear => break :load_op sdl.SDL_GPU_LOADOP_CLEAR,
+                        .Load => break :load_op sdl.SDL_GPU_LOADOP_LOAD,
+                        .DontCare => break :load_op sdl.SDL_GPU_LOADOP_DONT_CARE,
+                    }
+                }
+                break :load_op sdl.SDL_GPU_LOADOP_CLEAR;
+            };
             dti.store_op = sdl.SDL_GPU_STOREOP_STORE;
             dti.stencil_load_op = sdl.SDL_GPU_LOADOP_DONT_CARE;
             dti.stencil_store_op = sdl.SDL_GPU_STOREOP_DONT_CARE;

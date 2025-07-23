@@ -11,6 +11,7 @@ const UniformTransform = extern struct {
     projection: math.mat4,
     view: math.mat4,
     model: math.mat4,
+    magic_id: f32,
 };
 
 pub fn main() !void {
@@ -145,7 +146,7 @@ pub fn main() !void {
     };
 
     const quad = scene.get(host.GPUBuffer, assets.Default.Quad) orelse unreachable;
-    const quad_transform = math.mat4.mul(math.mat4.fromTranslate(math.vec3.new(0, -1, 3)), math.mat4.fromRotation(90, math.vec3.new(1, 0, 0)));
+    const quad_transform = math.mat4.mul(math.mat4.fromTranslate(math.vec3.new(40, 40, 0)), math.mat4.fromScale(math.vec3.new(64, 64, 1)));
 
     const gpuBuffer = scene.get(host.GPUBuffer, "floor") orelse unreachable;
 
@@ -159,12 +160,14 @@ pub fn main() !void {
         .projection = math.mat4.perspectiveReversedZ(60.0, @as(f32, @floatFromInt(options.display.width)) / @as(f32, @floatFromInt(options.display.height)), 0.01),
         .view = math.mat4.lookAt(math.vec3.new(0, 2, 3), math.vec3.zero(), math.vec3.up()),
         .model = math.mat4.identity(),
+        .magic_id = 42,
     };
 
     var uni_transform: UniformTransform = .{
-        .projection = transform.projection,
-        .view = transform.view,
+        .projection = math.mat4.orthographic(0, @floatFromInt(options.display.width), @floatFromInt(options.display.height), 0, 0.01, 1),
+        .view = math.mat4.fromTranslate(math.vec3.new(0, 0, 1)),
         .model = quad_transform,
+        .magic_id = 65535,
     };
 
     host.input_mode(.Keyboard);
@@ -180,7 +183,6 @@ pub fn main() !void {
         angle_x -= input.mouse_y_rel * 0.01;
 
         transform.view = math.mat4.lookAt(math.vec3.new(0, 1, -3), math.vec3.zero(), math.vec3.up());
-        uni_transform.view = transform.view;
 
         if (input.action_just_pressed(.Pause)) {
             break :app;
@@ -188,7 +190,7 @@ pub fn main() !void {
 
         const index: usize = @intFromBool(input.action_pressed(.Jump));
 
-        var renderPass = try pipeline.begin(.{ 0.0, 0.0, 0.0, 1.0 });
+        var renderPass = try pipeline.begin(.{ .Clear = .{ 0.0, 0.0, 0.0, 1.0 } }, .{ .Clear = undefined });
         pipeline.bind_uniform_buffer(renderPass, &color, @sizeOf(UniformColor), .Fragment, 0);
         pipeline.bind_uniform_buffer(renderPass, &transform, @sizeOf(UniformTransform), .Vertex, 0);
         try pipeline.bind_texture(&renderPass, textures[index]);

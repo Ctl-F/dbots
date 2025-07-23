@@ -240,9 +240,50 @@ pub const RawBuffer = struct {
 
 pub const Default = struct {
     pub const Quad = "_DefaultQuad_";
-    pub const CheckerBoard = "_CheckerBoardTex_";
+    pub const CheckerBoard = "_DefaultCheckerBoardTex_";
+    pub const TextVertexShader = "_DefaultShaderTextVertex_";
+    pub const TextFragmentShader = "_DefaultShaderTextFragment_";
 
     pub fn make_default(scene: *SceneResources) !void {
+        // resources that don't need explicit copy should be added
+        // as default resource requests here.
+        const shader_requests = [_]ResourceRequest{
+            .{
+                .asset_name = TextVertexShader,
+                .asset_source = "shaders/text.vert.spv",
+                .type = .{
+                    .shader = .{
+                        .stage = .Vertex,
+                        .resources = .{
+                            .sampler_count = 1,
+                            .storage_buffer_count = 0,
+                            .storage_texture_count = 0,
+                            .uniform_buffer_count = 1,
+                        },
+                    },
+                },
+            },
+            .{
+                .asset_name = TextFragmentShader,
+                .asset_source = "shaders/text.frag.spv",
+                .type = .{
+                    .shader = .{
+                        .stage = .Fragment,
+                        .resources = .{
+                            .sampler_count = 1,
+                            .storage_buffer_count = 0,
+                            .storage_texture_count = 0,
+                            .uniform_buffer_count = 1,
+                        },
+                    },
+                },
+            },
+        };
+
+        try scene.load(&shader_requests);
+
+        // resources that need explicit copy (vertex buffers, textures)
+        // should be added to this copy pass
         var copyPass = host.CopyPass.init(host.MemAlloc);
         defer copyPass.deinit();
 

@@ -11,6 +11,8 @@ const default_pack = @embedFile("../zig-out/bin/assets//locale/default.tlist");
 const default_language = Languages.English;
 
 pub const Languages = enum(u32) {
+    pub const Default = default_language;
+
     English,
 };
 
@@ -207,23 +209,23 @@ pub const LanguagePack = struct {
     }
 };
 
-pub const TextRendererConfig = struct {
-    ortho_view: struct {
-        x: f32,
-        y: f32,
-        width: f32,
-        height: f32,
-        near: f32,
-        far: f32,
-    },
-    language: LanguagePack,
-};
+// pub const TextRendererConfig = struct {
+//     ortho_view: struct {
+//         x: f32,
+//         y: f32,
+//         width: f32,
+//         height: f32,
+//         near: f32,
+//         far: f32,
+//     },
+//     language: LanguagePack,
+// };
 
-pub const TextRenderer = struct {
-    const This = @This();
+// pub const TextRenderer = struct {
+//     const This = @This();
 
-    parent: *assets.SceneResources,
-    projection: math.mat4,
+//     parent: *assets.SceneResources,
+//     projection: math.mat4,
 
-    pub fn init(config: TextRendererConfig, parent: *assets.SceneResources) This {}
-};
+//     pub fn init(config: TextRendererConfig, parent: *assets.SceneResources) This {}
+// };
