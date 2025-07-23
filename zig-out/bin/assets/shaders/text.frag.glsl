@@ -9,8 +9,15 @@ layout(set = 2, binding = 0) uniform sampler2D albedo;
 
 layout(set = 3, binding = 0) uniform ColorBlend {
     vec4 blend;
+    int show_texture;
 };
 
 void main() {
-    fragColor = texture(albedo, fUv);
+    if (show_texture != 0) {
+        float alpha = texture(albedo, fUv).a;
+        fragColor = vec4(blend.rgb, blend.a * alpha);
+    }
+    else {
+        fragColor = blend;
+    }
 }

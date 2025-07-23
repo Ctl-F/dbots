@@ -7,7 +7,7 @@ const key_t = assets.SceneResources.key_t;
 
 // have at least one langauge be included by default
 // translations can be loaded as needed
-const default_pack = @embedFile("../zig-out/bin/assets//locale/default.tlist");
+const default_pack = @embedFile("embed/default.tlist");
 const default_language = Languages.English;
 
 pub const Languages = enum(u32) {
@@ -32,9 +32,9 @@ pub const LanguagePack = struct {
 
     parent: *assets.SceneResources,
     font_name: []const u8,
-    cache_textures: [@intFromEnum(TextID._EOF_)]?[]u8,
+    cache_textures: [@intFromEnum(TextID._EOF_)]?[]const u8,
     cache_infos: [@intFromEnum(TextID._EOF_)]?Dim,
-    strings: []?[:0]const u8,
+    strings: []?[:0]u8,
     current_language: Languages,
 
     pub fn init(parent: *assets.SceneResources, fontName: []const u8) !This {
@@ -44,8 +44,9 @@ pub const LanguagePack = struct {
             .parent = parent,
             .font_name = fontName,
             .strings = strings,
-            .current_langauge = default_language,
-            .cache_textures = [_]?key_t{null} ** @intFromEnum(TextID._EOF_),
+            .current_language = default_language,
+            .cache_textures = [_]?[]const u8{null} ** @intFromEnum(TextID._EOF_),
+            .cache_infos = [_]?Dim{null} ** @intFromEnum(TextID._EOF_),
         };
     }
 
@@ -53,16 +54,29 @@ pub const LanguagePack = struct {
         this.clear_cache();
     }
 
+    pub fn gen_textures(this: *This) !void {
+        //TODO: THIS NEEDS TO BE SERIOUSLY REFACTORED
+        // TO DO THIS IN A SINGLE COPY PASS OR EVEN RETHOUGHT ON HOW TO
+        // DO THIS WITHOUT FLOODING THE CACHE. THIS IS THE **TEMPORARY**
+        // SOLUTION SO I CAN GET THINGS WORKING!!!
+        inline for (@typeInfo(TextID).@"enum".fields) |field| {
+            if (std.mem.eql(u8, field.name, "_EOF_")) break;
+
+            _ = try this.get_texture(@enumFromInt(field.value));
+        }
+    }
+
     pub fn get_texture(this: *This, id: TextID) !assets.GPUTexture {
         if (this.cache_textures[@intFromEnum(id)]) |key| {
-            return this.parent.get(assets.GPUTexture, key);
+            return this.parent.get(assets.GPUTexture, key).?;
         }
         const texture = try this.gen_texture(id);
 
         const pseudo_key = this.parent.next_key();
         const buffer = try std.fmt.allocPrint(this.parent.allocator, "CACHED-TEXT-{d}", .{pseudo_key});
+        errdefer this.parent.allocator.free(buffer);
 
-        this.parent.insert_resource(assets.GPUTexture, texture.texture, buffer, .{ .gpu_texture = .{} });
+        _ = try this.parent.insert_resource(assets.GPUTexture, texture.texture, buffer, .{ .gpu_texture = .{} });
 
         this.cache_textures[@intFromEnum(id)] = buffer;
         this.cache_infos[@intFromEnum(id)] = .{
@@ -70,7 +84,7 @@ pub const LanguagePack = struct {
             .height = texture.height,
         };
 
-        return texture;
+        return texture.texture;
     }
 
     pub fn get_texture_size(this: *This, id: TextID) !Dim {
@@ -95,6 +109,16 @@ pub const LanguagePack = struct {
         const font = this.parent.get_ptr(assets.Font, this.font_name) orelse return error.FontNotFound;
 
         const string = this.strings[idx] orelse "UNDEFINED";
+
+        std.debug.print("TextLoad[{s}]\n", .{string});
+        std.debug.assert(font.handle != null);
+
+        //BLENDED => RGBA32
+        //Solid => Mono8
+        // TODO: Add fast/fancy text rendering (solid is faster)
+        // now that we've solved the texture issue (the currently accepted solution)
+        // which coppies by rows and factors in pitch should now work for either.
+        // Note that the shader will need a tag to know whether or not to load from r or a channel
         const surface = sdl.TTF_RenderText_Blended(
             font.handle,
             string.ptr,
@@ -108,15 +132,13 @@ pub const LanguagePack = struct {
         );
 
         if (surface == null) {
-            return error.TextRenderError;
+            return host.sdl_debug_error("Text Render");
         }
         defer sdl.SDL_DestroySurface(surface);
 
-        // surfaces that are returned from TTL_RenderText apparently are lawyas in RGBA or SDL_PIXELFORMAT_RGBA32 format
-        std.debug.assert(surface.*.format == sdl.SDL_PIXELFORMAT_RGBA32);
-
         const pixelInfo = sdl.SDL_GetPixelFormatDetails(surface.*.format);
 
+        std.debug.print("Format: {}, BPP: {}\n", .{ surface.*.format, pixelInfo.*.bytes_per_pixel });
         // upload to gpu directly (done to avoid a bunch of resource insertion and sequential removing from the scene resources)
         const textureInfo = host.BufferCreateInfo{
             .dynamic_upload = false, // Maybe this is a case where it would be beneficial to set this to true...
@@ -130,18 +152,26 @@ pub const LanguagePack = struct {
                 .mag_filter = .Nearest,
                 .enable_mipmaps = false,
                 .mipmap_filter = .Nearest,
-                .texture_name = string[0..string.len],
+                .texture_name = string.ptr,
+                .format = .RGBA32,
             },
             .usage = .Sampler,
         };
-        const stage = try host.begin_stage_buffer(textureInfo);
+        var stage = try host.begin_stage_buffer(textureInfo);
         const buffer = try host.map_stage_buffer(u8, stage);
 
-        const len = @as(usize, @intCast(surface.*.w * surface.*.h * pixelInfo.*.bytes_per_pixel));
-        const view = buffer[0..len];
-        @memcpy(view, @as([*]const u8, @ptrCast(@alignCast(surface.*.pixels)))[0..len]);
+        var src_ptr: [*]u8 = @ptrCast(@alignCast(surface.*.pixels));
+        var dst_ptr: [*]u8 = buffer;
 
-        const texture = try host.submit_stage_buffer(host.GPUTexture, stage, null);
+        for (0..@as(usize, @intCast(surface.*.h))) |_| {
+            const span: usize = @intCast(surface.*.w * pixelInfo.*.bytes_per_pixel);
+
+            @memcpy(dst_ptr[0..span], src_ptr[0..span]);
+            src_ptr += @as(usize, @intCast(surface.*.pitch));
+            dst_ptr += span;
+        }
+
+        const texture = (try host.submit_stage_buffer(host.GPUTexture, &stage, null)).?;
 
         return .{
             .texture = texture,
@@ -164,7 +194,7 @@ pub const LanguagePack = struct {
         return error.NotImplemented;
     }
 
-    fn update_strings(this: *This, new_pack: []const ?[]const u8) void {
+    fn update_strings(this: *This, new_pack: []const ?[:0]u8) void {
         var any = false;
         for (0..this.strings.len) |lineno| {
             if (new_pack[lineno] == null) continue;
@@ -192,20 +222,22 @@ pub const LanguagePack = struct {
         }
     }
 
-    fn parse_text_list(allocator: std.mem.Allocator, data: []const u8) ![]?[:0]const u8 {
+    fn parse_text_list(allocator: std.mem.Allocator, data: []const u8) ![]?[:0]u8 {
         const max_text_idx: u32 = @intFromEnum(TextID._EOF_);
-        const buffer = try allocator.alloc([]const u8, max_text_idx);
+        var buffer = try allocator.alloc(?[:0]u8, max_text_idx);
         errdefer allocator.free(buffer);
 
         var lines = std.mem.splitAny(u8, data, "\n");
         var index: usize = 0;
         while (lines.next()) |line| : (index += 1) {
+            if (line.len == 0) break;
+
             buffer[index] = try allocator.allocSentinel(u8, line.len, 0);
             errdefer allocator.free(buffer[index]);
-            @memcpy(buffer[index][0..line.len], line);
+            @memcpy(buffer[index].?[0..line.len], line);
         }
 
-        return error.NotImplemented;
+        return buffer;
     }
 };
 

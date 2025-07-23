@@ -1,3 +1,3 @@
-const Embedded_Folder = "../zig-out/bin/assets/embed/";
+const Embedded_Folder = "./embed/";
 
-pub const Font = @embedFile(Embedded_Folder ++ "DUNSTA__.TTF");
+//pub const Font = @embedFile(Embedded_Folder ++ "DUNSTA__.TTF");

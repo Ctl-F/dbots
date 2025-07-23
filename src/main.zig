@@ -2,6 +2,7 @@ const std = @import("std");
 const host = @import("host.zig");
 const assets = @import("assets.zig");
 const math = @import("math.zig");
+const UI = @import("ui.zig");
 
 const UniformColor = extern struct {
     color: [4]f32,
@@ -76,6 +77,13 @@ pub fn main() !void {
                 .mesh = .{ .vertex_count = undefined },
             },
         },
+        assets.ResourceRequest{
+            .asset_name = "main_font",
+            .asset_source = "fonts/DUNSTA__.TTF",
+            .type = .{
+                .font = .{ .size = 48 },
+            },
+        },
     });
 
     var format: host.VertexFormat = undefined;
@@ -145,30 +153,28 @@ pub fn main() !void {
         scene.get(host.GPUTexture, assets.Default.CheckerBoard) orelse unreachable,
     };
 
-    const quad = scene.get(host.GPUBuffer, assets.Default.Quad) orelse unreachable;
-    const quad_transform = math.mat4.mul(math.mat4.fromTranslate(math.vec3.new(40, 40, 0)), math.mat4.fromScale(math.vec3.new(64, 64, 1)));
+    // const quad = scene.get(host.GPUBuffer, assets.Default.Quad) orelse unreachable;
+    // const quad_transform = math.mat4.mul(math.mat4.fromTranslate(math.vec3.new(40, 40, 0)), math.mat4.fromScale(math.vec3.new(64, 64, 1)));
 
     const gpuBuffer = scene.get(host.GPUBuffer, "floor") orelse unreachable;
 
     scene.free_resource("basic_vert");
     scene.free_resource("basic_frag");
 
-    std.debug.print("Starting main loop\n", .{});
-
     var color: UniformColor = .{ .color = @splat(1) };
     var transform: UniformTransform = .{
-        .projection = math.mat4.perspectiveReversedZ(60.0, @as(f32, @floatFromInt(options.display.width)) / @as(f32, @floatFromInt(options.display.height)), 0.01),
+        .projection = math.mat4.perspectiveReversedZ(90.0, @as(f32, @floatFromInt(options.display.width)) / @as(f32, @floatFromInt(options.display.height)), 0.01),
         .view = math.mat4.lookAt(math.vec3.new(0, 2, 3), math.vec3.zero(), math.vec3.up()),
         .model = math.mat4.identity(),
         .magic_id = 42,
     };
 
-    var uni_transform: UniformTransform = .{
-        .projection = math.mat4.orthographic(0, @floatFromInt(options.display.width), @floatFromInt(options.display.height), 0, 0.01, 1),
-        .view = math.mat4.fromTranslate(math.vec3.new(0, 0, 1)),
-        .model = quad_transform,
-        .magic_id = 65535,
-    };
+    // var uni_transform: UniformTransform = .{
+    //     .projection = math.mat4.orthographic(0, @floatFromInt(options.display.width), @floatFromInt(options.display.height), 0, 0.01, 1),
+    //     .view = math.mat4.fromTranslate(math.vec3.new(0, 0, 1)),
+    //     .model = quad_transform,
+    //     .magic_id = 65535,
+    // };
 
     host.input_mode(.Keyboard);
     var input = host.input();
@@ -176,6 +182,12 @@ pub fn main() !void {
     var angle_x: f32 = 0;
     var angle_y: f32 = 0;
 
+    var ui = try UI.init(@floatFromInt(options.display.width), @floatFromInt(options.display.height), 0.01, 100.0, &scene, "main_font", .English);
+
+    //***TEMPORARY***
+    try ui.language_pack.gen_textures();
+
+    std.debug.print("Starting main loop\n", .{});
     app: while (!input.should_close()) {
         input.process_events();
 
@@ -190,15 +202,22 @@ pub fn main() !void {
 
         const index: usize = @intFromBool(input.action_pressed(.Jump));
 
-        var renderPass = try pipeline.begin(.{ .Clear = .{ 0.0, 0.0, 0.0, 1.0 } }, .{ .Clear = undefined });
+        var renderPass = try pipeline.begin(.{ .Clear = .{ 0.0, 0.0, 0.0, 1.0 } }, .{ .Clear = undefined }, null);
         pipeline.bind_uniform_buffer(renderPass, &color, @sizeOf(UniformColor), .Fragment, 0);
         pipeline.bind_uniform_buffer(renderPass, &transform, @sizeOf(UniformTransform), .Vertex, 0);
         try pipeline.bind_texture(&renderPass, textures[index]);
         pipeline.bind_vertex_buffer(&renderPass, gpuBuffer);
 
-        pipeline.bind_uniform_buffer(renderPass, &uni_transform, @sizeOf(UniformTransform), .Vertex, 0);
-        try pipeline.bind_texture(&renderPass, textures[1]);
-        pipeline.bind_vertex_buffer(&renderPass, quad);
+        // pipeline.bind_uniform_buffer(renderPass, &uni_transform, @sizeOf(UniformTransform), .Vertex, 0);
+        // try pipeline.bind_texture(&renderPass, textures[1]);
+        // pipeline.bind_vertex_buffer(&renderPass, quad);
+
+        try ui.begin_ui_pass(renderPass);
+
+        try ui.render_text(&renderPass, .HelloWorld, 10, 10, math.vec4.one());
+        try ui.render_quad(&renderPass, 100, 100, 16, 16, math.vec4.one(), null);
+
+        try ui.render_text_aligned(&renderPass, .Title, @floatFromInt(options.display.width / 2), 10, .TopCenter, math.vec4.new(1, 0, 0, 1));
 
         try pipeline.end(renderPass);
     }

@@ -52,8 +52,8 @@ pub fn build(b: *std.Build) void {
 
 fn build_shaders(b: *std.Build, exe: *std.Build.Step.Compile) !void {
     const shaders_folder = "zig-out/bin/assets/shaders";
-
     const cwd = try std.fs.cwd().openDir(shaders_folder, .{ .iterate = true });
+
     var walker = try cwd.walk(b.allocator);
 
     std.debug.print("Compiling shaders...\n", .{});

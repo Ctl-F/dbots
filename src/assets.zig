@@ -255,7 +255,7 @@ pub const Default = struct {
                     .shader = .{
                         .stage = .Vertex,
                         .resources = .{
-                            .sampler_count = 1,
+                            .sampler_count = 0,
                             .storage_buffer_count = 0,
                             .storage_texture_count = 0,
                             .uniform_buffer_count = 1,
@@ -516,14 +516,19 @@ pub const SceneResources = struct {
             return error.ResourceDoubleLoad;
         }
 
-        const data = try Module.read_file(this.allocator, request.asset_source);
-        defer this.allocator.free(data);
+        // const data = try Module.read_file(this.allocator, request.asset_source);
+        // defer this.allocator.free(data);
 
-        const font = sdl.TTF_OpenFontIO(
-            sdl.SDL_IOFromConstMem(data.ptr, data.len),
-            true,
-            fontRes.size,
-        );
+        // const font = sdl.TTF_OpenFontIO(
+        //     sdl.SDL_IOFromConstMem(data.ptr, data.len),
+        //     true,
+        //     fontRes.size,
+        // );
+
+        const path = try Module.get_asset_pathz(this.allocator, request.asset_source);
+        defer this.allocator.free(path);
+
+        const font = sdl.TTF_OpenFont(path.ptr, fontRes.size);
 
         if (font == null) {
             return error.FontLoadFailure;

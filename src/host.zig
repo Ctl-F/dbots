@@ -299,6 +299,46 @@ pub const Topology = enum {
     }
 };
 
+pub const BlendMode = enum {
+    Disabled,
+    Alpha,
+    Additive,
+
+    fn get_blend_state(this: @This()) sdl.SDL_GPUColorTargetBlendState {
+        return switch (this) {
+            .Disabled => std.mem.zeroes(sdl.SDL_GPUColorTargetBlendState),
+            .Alpha => sdl.SDL_GPUColorTargetBlendState{
+                .enable_blend = true,
+                .src_color_blendfactor = sdl.SDL_GPU_BLENDFACTOR_SRC_ALPHA,
+                .dst_color_blendfactor = sdl.SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
+                .color_blend_op = sdl.SDL_GPU_BLENDOP_ADD,
+
+                .src_alpha_blendfactor = sdl.SDL_GPU_BLENDFACTOR_ONE,
+                .dst_alpha_blendfactor = sdl.SDL_GPU_BLENDFACTOR_ZERO,
+                .alpha_blend_op = sdl.SDL_GPU_BLENDOP_ADD,
+                .color_write_mask = sdl.SDL_GPU_COLORCOMPONENT_R |
+                    sdl.SDL_GPU_COLORCOMPONENT_G |
+                    sdl.SDL_GPU_COLORCOMPONENT_B |
+                    sdl.SDL_GPU_COLORCOMPONENT_A,
+            },
+            .Additive => sdl.SDL_GPUColorTargetBlendState{
+                .enable_blend = true,
+                .src_color_blendfactor = sdl.SDL_GPU_BLENDFACTOR_SRC_ALPHA,
+                .dst_color_blendfactor = sdl.SDL_GPU_BLENDFACTOR_ONE,
+                .color_blend_op = sdl.SDL_GPU_BLENDOP_ADD,
+
+                .src_alpha_blendfactor = sdl.SDL_GPU_BLENDFACTOR_ONE,
+                .dst_alpha_blendfactor = sdl.SDL_GPU_BLENDFACTOR_ONE,
+                .alpha_blend_op = sdl.SDL_GPU_BLENDOP_ADD,
+                .color_write_mask = sdl.SDL_GPU_COLORCOMPONENT_R |
+                    sdl.SDL_GPU_COLORCOMPONENT_G |
+                    sdl.SDL_GPU_COLORCOMPONENT_B |
+                    sdl.SDL_GPU_COLORCOMPONENT_A,
+            },
+        };
+    }
+};
+
 pub const PipelineConfig = struct {
     vertex_shader: assets.Shader,
     fragment_shader: assets.Shader,
@@ -306,6 +346,7 @@ pub const PipelineConfig = struct {
     vertex_format: VertexFormat,
     enable_depth_buffer: bool,
     enable_culling: bool,
+    blend_mode: BlendMode = .Disabled,
 };
 // vulkan minimum number of textures per shader. Increase at your own risk
 pub const MAX_RENDERPASS_TEXTURE_COUNT = 16;
@@ -351,6 +392,7 @@ pub const Pipeline = struct {
             .target_info = .{
                 .color_target_descriptions = &sdl.SDL_GPUColorTargetDescription{
                     .format = sdl.SDL_GetGPUSwapchainTextureFormat(gpu_device, windowptr),
+                    .blend_state = config.blend_mode.get_blend_state(),
                 },
                 .num_color_targets = 1,
                 .has_depth_stencil_target = config.enable_depth_buffer,
@@ -435,69 +477,80 @@ pub const Pipeline = struct {
         DontCare,
     };
 
-    pub fn begin(this: This, loadOp: RenderPassLoadOp, depthLoadOp: ?RenderPassLoadOp) !RenderPass {
-        var renderPass = RenderPass{
-            .command_buffer = null,
-            .render_pass = null,
-            .swapchain_texture = null,
-            .frame_textures = &.{},
-            .texture_buffer = undefined,
+    /// if existing is null then a new renderpass will be started
+    /// if you need multiple pipeline calls per renderpass you can pass the existing render pass in and the
+    /// renderpass initialization will be skipped. any .end() from any pipeline for any renderpass started from
+    /// any pipeline should be valid, only testing will confirm.
+    /// NOTE: Should probably rethink this design and interface a little more
+    pub fn begin(this: This, loadOp: RenderPassLoadOp, depthLoadOp: ?RenderPassLoadOp, existing: ?RenderPass) !RenderPass {
+        const renderPass = existing orelse init: {
+            var rp = RenderPass{
+                .command_buffer = null,
+                .render_pass = null,
+                .swapchain_texture = null,
+                .frame_textures = &.{},
+                .texture_buffer = undefined,
+            };
+
+            rp.command_buffer = sdl.SDL_AcquireGPUCommandBuffer(gpu_device);
+            if (rp.command_buffer == null) {
+                return error.UnableToObtainCommandBuffer;
+            }
+
+            if (!sdl.SDL_WaitAndAcquireGPUSwapchainTexture(rp.command_buffer, windowptr, &rp.swapchain_texture, null, null)) {
+                return error.UnableToObtainSwapchainTexture;
+            }
+
+            var colorTargetInfo = std.mem.zeroes(sdl.SDL_GPUColorTargetInfo);
+            colorTargetInfo.texture = rp.swapchain_texture;
+            colorTargetInfo.store_op = sdl.SDL_GPU_STOREOP_STORE;
+
+            switch (loadOp) {
+                .Clear => |clearColor| {
+                    colorTargetInfo.load_op = sdl.SDL_GPU_LOADOP_CLEAR;
+                    colorTargetInfo.clear_color = sdl.SDL_FColor{ .r = clearColor[0], .g = clearColor[1], .b = clearColor[2], .a = clearColor[3] };
+                },
+                .Load => {
+                    colorTargetInfo.load_op = sdl.SDL_GPU_LOADOP_LOAD;
+                },
+                .DontCare => {
+                    colorTargetInfo.load_op = sdl.SDL_GPU_LOADOP_DONT_CARE;
+                },
+            }
+
+            var depthTargetInfo: ?sdl.SDL_GPUDepthStencilTargetInfo = if (this.depth_texture != null) RES: {
+                var dti = std.mem.zeroes(sdl.SDL_GPUDepthStencilTargetInfo);
+                dti.texture = this.depth_texture;
+                dti.clear_depth = 1.0;
+                dti.clear_stencil = 0;
+                dti.load_op = load_op: {
+                    if (depthLoadOp) |dlo| {
+                        switch (dlo) {
+                            .Clear => break :load_op sdl.SDL_GPU_LOADOP_CLEAR,
+                            .Load => break :load_op sdl.SDL_GPU_LOADOP_LOAD,
+                            .DontCare => break :load_op sdl.SDL_GPU_LOADOP_DONT_CARE,
+                        }
+                    }
+                    break :load_op sdl.SDL_GPU_LOADOP_CLEAR;
+                };
+                dti.store_op = sdl.SDL_GPU_STOREOP_STORE;
+                dti.stencil_load_op = sdl.SDL_GPU_LOADOP_DONT_CARE;
+                dti.stencil_store_op = sdl.SDL_GPU_STOREOP_DONT_CARE;
+                break :RES dti;
+            } else null;
+
+            const depthTargetInfoPtr: [*c]const sdl.SDL_GPUDepthStencilTargetInfo = if (depthTargetInfo == null) null else &depthTargetInfo.?;
+            rp.render_pass = sdl.SDL_BeginGPURenderPass(rp.command_buffer, &colorTargetInfo, 1, depthTargetInfoPtr);
+
+            break :init rp;
         };
 
-        renderPass.command_buffer = sdl.SDL_AcquireGPUCommandBuffer(gpu_device);
-        if (renderPass.command_buffer == null) {
-            return error.UnableToObtainCommandBuffer;
-        }
-
-        if (!sdl.SDL_WaitAndAcquireGPUSwapchainTexture(renderPass.command_buffer, windowptr, &renderPass.swapchain_texture, null, null)) {
-            return error.UnableToObtainSwapchainTexture;
-        }
-
-        var colorTargetInfo = std.mem.zeroes(sdl.SDL_GPUColorTargetInfo);
-        colorTargetInfo.texture = renderPass.swapchain_texture;
-        colorTargetInfo.store_op = sdl.SDL_GPU_STOREOP_STORE;
-
-        switch (loadOp) {
-            .Clear => |clearColor| {
-                colorTargetInfo.load_op = sdl.SDL_GPU_LOADOP_CLEAR;
-                colorTargetInfo.clear_color = sdl.SDL_FColor{ .r = clearColor[0], .g = clearColor[1], .b = clearColor[2], .a = clearColor[3] };
-            },
-            .Load => {
-                colorTargetInfo.load_op = sdl.SDL_GPU_LOADOP_LOAD;
-            },
-            .DontCare => {
-                colorTargetInfo.load_op = sdl.SDL_GPU_LOADOP_DONT_CARE;
-            },
-        }
-
-        var depthTargetInfo: ?sdl.SDL_GPUDepthStencilTargetInfo = if (this.depth_texture != null) RES: {
-            var dti = std.mem.zeroes(sdl.SDL_GPUDepthStencilTargetInfo);
-            dti.texture = this.depth_texture;
-            dti.clear_depth = 1.0;
-            dti.clear_stencil = 0;
-            dti.load_op = load_op: {
-                if (depthLoadOp) |dlo| {
-                    switch (dlo) {
-                        .Clear => break :load_op sdl.SDL_GPU_LOADOP_CLEAR,
-                        .Load => break :load_op sdl.SDL_GPU_LOADOP_LOAD,
-                        .DontCare => break :load_op sdl.SDL_GPU_LOADOP_DONT_CARE,
-                    }
-                }
-                break :load_op sdl.SDL_GPU_LOADOP_CLEAR;
-            };
-            dti.store_op = sdl.SDL_GPU_STOREOP_STORE;
-            dti.stencil_load_op = sdl.SDL_GPU_LOADOP_DONT_CARE;
-            dti.stencil_store_op = sdl.SDL_GPU_STOREOP_DONT_CARE;
-            break :RES dti;
-        } else null;
-
-        const depthTargetInfoPtr: [*c]const sdl.SDL_GPUDepthStencilTargetInfo = if (depthTargetInfo == null) null else &depthTargetInfo.?;
-        renderPass.render_pass = sdl.SDL_BeginGPURenderPass(renderPass.command_buffer, &colorTargetInfo, 1, depthTargetInfoPtr);
-        //std.debug.print("Render Pass Begin\n", .{});
-        sdl.SDL_BindGPUGraphicsPipeline(renderPass.render_pass, this.handle);
-        //std.debug.print("Bind pipeline\n", .{});
-
+        this.use(renderPass);
         return renderPass;
+    }
+
+    pub fn use(this: This, renderPass: RenderPass) void {
+        sdl.SDL_BindGPUGraphicsPipeline(renderPass.render_pass, this.handle);
     }
 
     /// uniforms and textures need to be bound before calling this
@@ -769,7 +822,7 @@ fn begin_stage_buffer_create_sampler(createInfo: BufferCreateInfo) !BufferStagin
         gpu_device,
         &.{
             .type = sdl.SDL_GPU_TEXTURETYPE_2D,
-            .format = INTERNAL_GPU_PIXEL_FORMAT,
+            .format = sampler_info.format.convert(),
             .width = sampler_info.width,
             .height = sampler_info.height,
             .layer_count_or_depth = 1,
@@ -1244,10 +1297,23 @@ pub const GPUSamplerInfo = struct {
     address_policy: GPUSamplerAddressPolicy,
     enable_mipmaps: bool,
     texture_name: ?[*c]const u8,
+    format: GPUPixelFormat = .RGBA32,
+};
+
+pub const GPUPixelFormat = enum {
+    RGBA32,
+    Mono8,
+
+    fn convert(this: @This()) c_uint {
+        return switch (this) {
+            .RGBA32 => sdl.SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
+            .Mono8 => sdl.SDL_GPU_TEXTUREFORMAT_R8_UNORM,
+        };
+    }
 };
 
 pub const INTERNAL_PIXEL_FORMAT = sdl.SDL_PIXELFORMAT_RGBA8888;
-pub const INTERNAL_GPU_PIXEL_FORMAT = sdl.SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+//pub const INTERNAL_GPU_PIXEL_FORMAT = sdl.SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
 pub const BYTES_PER_PIXEL = 4;
 
 // pub fn create(texture: assets.SoftwareTexture, samplerInfo: GPUSamplerInfo) !This {
