@@ -81,7 +81,7 @@ pub fn main() !void {
             .asset_name = "main_font",
             .asset_source = "fonts/DUNSTA__.TTF",
             .type = .{
-                .font = .{ .size = 48 },
+                .font = .{ .size = 20 },
             },
         },
     });
@@ -187,6 +187,8 @@ pub fn main() !void {
     //***TEMPORARY***
     try ui.language_pack.gen_textures();
 
+    var counter: u64 = 0;
+
     std.debug.print("Starting main loop\n", .{});
     app: while (!input.should_close()) {
         input.process_events();
@@ -219,10 +221,13 @@ pub fn main() !void {
 
         try ui.render_text_aligned(&renderPass, .Title, @floatFromInt(options.display.width / 2), 10, .TopCenter, math.vec4.new(1, 0, 0, 1));
 
+        try ui.render_number(&renderPass, @as(f64, @floatFromInt(counter)), 300, 150, .MiddleLeft, math.vec4.new(0, 1, 1, 1));
+        counter += 1;
         try pipeline.end(renderPass);
     }
 }
-
+// TODO: Test language loading (portuguese)
+// TODO: Scene
 // TODO: Finish text rendering
 // TODO: Test Camera (formaize camera)
 

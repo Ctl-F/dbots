@@ -133,6 +133,47 @@ pub fn begin_ui_pass(this: *This, renderPass: RenderPass) !void {
     this.pipeline.use(renderPass);
 }
 
+//TODO: Render fmt???
+
+var NUMBER_BUFFER = [_]u8{0} ** 512;
+
+pub fn render_number(this: *This, renderPass: *RenderPass, value: f64, x: f32, y: f32, anchor: Anchor, blend: ?math.vec4) !void {
+    var cursor_x = x;
+
+    //TODO: fix right-aligned text
+
+    const string = try std.fmt.bufPrint(&NUMBER_BUFFER, "{d:0>5.3}", .{value});
+
+    for (string) |char| {
+        const string_id: text.TextID = switch (char) {
+            '0' => .n0,
+            '1' => .n1,
+            '2' => .n2,
+            '3' => .n3,
+            '4' => .n4,
+            '5' => .n5,
+            '6' => .n6,
+            '7' => .n7,
+            '8' => .n8,
+            '9' => .n9,
+            'e' => .e,
+            '-' => .nneg,
+            '.' => .ndec,
+            else => {
+                std.debug.print("Unreachable char: {}\n", .{char});
+                unreachable;
+            },
+        };
+
+        const texture = try this.language_pack.get_texture(string_id);
+        const size = try this.language_pack.get_texture_size(string_id);
+
+        try render_quad_anchor(this, renderPass, cursor_x, y, size.width, size.height, anchor, blend, texture);
+
+        cursor_x += size.width;
+    }
+}
+
 pub fn render_text(this: *This, renderPass: *RenderPass, string: text.TextID, x: f32, y: f32, blend: ?math.vec4) !void {
     const texture = try this.language_pack.get_texture(string);
     const size = try this.language_pack.get_texture_size(string);

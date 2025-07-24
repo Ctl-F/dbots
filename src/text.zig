@@ -14,9 +14,23 @@ pub const Languages = enum(u32) {
     pub const Default = default_language;
 
     English,
+    Portuguese,
 };
 
 pub const TextID = enum(u32) {
+    n0,
+    n1,
+    n2,
+    n3,
+    n4,
+    n5,
+    n6,
+    n7,
+    n8,
+    n9,
+    e,
+    nneg,
+    ndec,
     Title,
     HelloWorld,
     _EOF_,
@@ -110,7 +124,6 @@ pub const LanguagePack = struct {
 
         const string = this.strings[idx] orelse "UNDEFINED";
 
-        std.debug.print("TextLoad[{s}]\n", .{string});
         std.debug.assert(font.handle != null);
 
         //BLENDED => RGBA32
@@ -138,7 +151,6 @@ pub const LanguagePack = struct {
 
         const pixelInfo = sdl.SDL_GetPixelFormatDetails(surface.*.format);
 
-        std.debug.print("Format: {}, BPP: {}\n", .{ surface.*.format, pixelInfo.*.bytes_per_pixel });
         // upload to gpu directly (done to avoid a bunch of resource insertion and sequential removing from the scene resources)
         const textureInfo = host.BufferCreateInfo{
             .dynamic_upload = false, // Maybe this is a case where it would be beneficial to set this to true...
