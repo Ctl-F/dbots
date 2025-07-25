@@ -85,6 +85,13 @@ pub fn main() !void {
                 .font = .{ .size = 20 },
             },
         },
+        assets.ResourceRequest{
+            .asset_name = "cube",
+            .asset_source = "meshes/Cube.rvb",
+            .type = .{
+                .mesh = .{ .vertex_count = undefined },
+            },
+        },
     });
 
     var format: host.VertexFormat = undefined;
@@ -121,6 +128,20 @@ pub fn main() !void {
             .info = bufferInfo,
         }, &copyPass);
 
+        const cube = scene.get_lookup_info("cube") orelse unreachable;
+        const cubeInfo = host.BufferCreateInfo{
+            .dynamic_upload = false,
+            .element_size = @sizeOf(assets.Vertex),
+            .num_elements = @intCast(cube.mesh.vertex_count),
+            .texture_info = null,
+            .usage = .Vertex,
+        };
+        _ = try scene.add_buffer_copy(.{
+            .source_name = "cube",
+            .dest_name = "cube_mesh",
+            .info = cubeInfo,
+        }, &copyPass);
+
         const dreye_ref = scene.get(assets.SoftwareTexture, "dragon_eye") orelse unreachable;
 
         _ = try scene.add_texture_copy(.{
@@ -142,7 +163,7 @@ pub fn main() !void {
 
         try scene.claim_copy_result(host.GPUTexture, copyPass, "gpu_dragon_eye");
         try scene.claim_copy_result(host.GPUBuffer, copyPass, "floor");
-
+        try scene.claim_copy_result(host.GPUBuffer, copyPass, "cube_mesh");
         copyPass.claim_ownership_of_results();
     }
 
@@ -155,6 +176,7 @@ pub fn main() !void {
     };
 
     const gpuBuffer = scene.get(host.GPUBuffer, "floor") orelse unreachable;
+    const cube = scene.get(host.GPUBuffer, "cube_mesh") orelse unreachable;
 
     scene.free_resource("basic_vert");
     scene.free_resource("basic_frag");
@@ -231,11 +253,18 @@ pub fn main() !void {
 
         const index: usize = @intFromBool(input.action_pressed(.Jump));
 
+        transform.model = math.mat4.identity();
+
         var renderPass = try pipeline.begin(.{ .Clear = .{ 0.0, 0.0, 0.0, 1.0 } }, .{ .Clear = .{ 0.0, 0.0, 0.0, 0.0 } }, null);
         pipeline.bind_uniform_buffer(renderPass, &color, @sizeOf(UniformColor), .Fragment, 0);
         pipeline.bind_uniform_buffer(renderPass, &transform, @sizeOf(UniformTransform), .Vertex, 0);
         try pipeline.bind_texture(&renderPass, textures[index]);
         pipeline.bind_vertex_buffer(&renderPass, gpuBuffer);
+
+        transform.model = transform.model.scale(math.vec3.set(10));
+        pipeline.bind_uniform_buffer(renderPass, &transform, @sizeOf(UniformTransform), .Vertex, 0);
+        try pipeline.bind_texture(&renderPass, textures[1]);
+        pipeline.bind_vertex_buffer(&renderPass, cube);
 
         try ui.begin_ui_pass(renderPass);
 

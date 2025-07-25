@@ -98,7 +98,7 @@ pub fn init(display_width: f32, display_height: f32, zNear: f32, zFar: f32, scen
 
     const pipelineInfo = host.PipelineConfig{
         .enable_culling = false,
-        .enable_depth_buffer = true,
+        .enable_depth_buffer = false,
         .fragment_shader = scene.get(assets.Shader, assets.Default.TextFragmentShader) orelse unreachable,
         .vertex_shader = scene.get(assets.Shader, assets.Default.TextVertexShader) orelse unreachable,
         .topology = .TriangleList,

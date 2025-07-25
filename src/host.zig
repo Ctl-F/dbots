@@ -351,6 +351,9 @@ pub const PipelineConfig = struct {
 // vulkan minimum number of textures per shader. Increase at your own risk
 pub const MAX_RENDERPASS_TEXTURE_COUNT = 16;
 
+pub const PipelineID = u32;
+var __PipelineIDCounter__: PipelineID = 0; // not planning on multi-threading so this should be safe
+
 pub const Pipeline = struct {
     const This = @This();
 
@@ -369,6 +372,7 @@ pub const Pipeline = struct {
 
     handle: *sdl.SDL_GPUGraphicsPipeline,
     depth_texture: ?*sdl.SDL_GPUTexture,
+    id: PipelineID,
 
     const DEPTH_TEXTURE_FMT = sdl.SDL_GPU_TEXTUREFORMAT_D24_UNORM;
 
@@ -469,9 +473,11 @@ pub const Pipeline = struct {
         //std.debug.print("Pipeline create\n", .{});
         const pipeline = sdl.SDL_CreateGPUGraphicsPipeline(gpu_device, &pipeline_info);
         if (pipeline) |handle| {
+            defer __PipelineIDCounter__ += 1;
             return This{
                 .handle = handle,
                 .depth_texture = depth_tex,
+                .id = __PipelineIDCounter__,
             };
         }
         return error.FailedToCreatePipeline;
