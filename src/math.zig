@@ -7,6 +7,14 @@ pub const vec4 = zalg.Vec4;
 pub const mat4 = zalg.Mat4;
 pub const quat = zalg.Quat;
 
+pub inline fn deg_to_rad(degrees: f32) f32 {
+    return zalg.toRadians(degrees);
+}
+
+pub inline fn rad_to_deg(radians: f32) f32 {
+    return zalg.toDegrees(radians);
+}
+
 // const std = @import("std");
 
 // pub const vec2 = @Vector(2, f32);

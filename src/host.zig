@@ -405,6 +405,12 @@ pub const Pipeline = struct {
                 .fill_mode = sdl.SDL_GPU_FILLMODE_FILL,
                 .front_face = sdl.SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE,
             };
+        } else {
+            pipeline_info.rasterizer_state = sdl.SDL_GPURasterizerState{
+                .cull_mode = sdl.SDL_GPU_CULLMODE_NONE,
+                .fill_mode = sdl.SDL_GPU_FILLMODE_FILL,
+                .front_face = sdl.SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE,
+            };
         }
 
         const depth_tex: ?*sdl.SDL_GPUTexture = if (config.enable_depth_buffer) TEXTURE: {
@@ -413,7 +419,7 @@ pub const Pipeline = struct {
                 .enable_depth_test = true,
                 .enable_depth_write = true,
                 .enable_stencil_test = false,
-                .compare_op = sdl.SDL_GPU_COMPAREOP_LESS,
+                .compare_op = sdl.SDL_GPU_COMPAREOP_GREATER, // because of projection matrix this is greater not less
                 .write_mask = 0xFF,
             };
 
@@ -521,7 +527,7 @@ pub const Pipeline = struct {
             var depthTargetInfo: ?sdl.SDL_GPUDepthStencilTargetInfo = if (this.depth_texture != null) RES: {
                 var dti = std.mem.zeroes(sdl.SDL_GPUDepthStencilTargetInfo);
                 dti.texture = this.depth_texture;
-                dti.clear_depth = 1.0;
+                dti.clear_depth = 0.0; // because of matrix this needs to be zero not 1
                 dti.clear_stencil = 0;
                 dti.load_op = load_op: {
                     if (depthLoadOp) |dlo| {

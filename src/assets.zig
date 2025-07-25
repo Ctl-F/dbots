@@ -686,17 +686,21 @@ pub const SceneResources = struct {
         _ = try this.insert_resource(T, result, name, info);
     }
 
-    pub fn assert_asset_exists(this: This, comptime T: type, name: []const u8) void {
-        const lookup = this.lookup.get(name) orelse unreachable;
+    pub fn asset_exists(this: This, comptime T: type, name: []const u8) bool {
+        const lookup = this.lookup.get(name) orelse return false;
         switch (T) {
-            RawBuffer => std.debug.assert(lookup.resource_type == .raw or lookup.resource_type == .mesh),
-            Shader => std.debug.assert(lookup.resource_type == .shader),
-            SoftwareTexture => std.debug.assert(lookup.resource_type == .texture),
-            GPUTexture => std.debug.assert(lookup.resource_type == .gpu_texture),
-            GPUBuffer => std.debug.assert(lookup.resource_type == .gpu_buffer),
-            Font => std.debug.assert(lookup.resource_type == .font),
+            RawBuffer => return (lookup.resource_type == .raw or lookup.resource_type == .mesh),
+            Shader => return (lookup.resource_type == .shader),
+            SoftwareTexture => return (lookup.resource_type == .texture),
+            GPUTexture => return (lookup.resource_type == .gpu_texture),
+            GPUBuffer => return (lookup.resource_type == .gpu_buffer),
+            Font => return (lookup.resource_type == .font),
             else => unreachable,
         }
+    }
+
+    pub fn assert_asset_exists(this: This, comptime T: type, name: []const u8) void {
+        if (!asset_exists(this, T, name)) unreachable;
     }
 
     pub fn convert_textures(this: *This, textures: []const TextureUploadInfo) !void {

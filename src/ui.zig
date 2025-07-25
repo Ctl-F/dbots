@@ -137,9 +137,9 @@ pub fn begin_ui_pass(this: *This, renderPass: RenderPass) !void {
 
 var NUMBER_BUFFER = [_]u8{0} ** 512;
 
-pub fn render_number(this: *This, renderPass: *RenderPass, value: f64, x: f32, y: f32, anchor: Anchor, blend: ?math.vec4) !void {
+pub fn render_number(this: *This, renderPass: ?*RenderPass, value: f64, x: f32, y: f32, anchor: Anchor, blend: ?math.vec4) !text.Dim {
     var cursor_x = x;
-
+    var height: f32 = 0;
     //TODO: fix right-aligned text
 
     const string = try std.fmt.bufPrint(&NUMBER_BUFFER, "{d:0>5.3}", .{value});
@@ -168,9 +168,138 @@ pub fn render_number(this: *This, renderPass: *RenderPass, value: f64, x: f32, y
         const texture = try this.language_pack.get_texture(string_id);
         const size = try this.language_pack.get_texture_size(string_id);
 
-        try render_quad_anchor(this, renderPass, cursor_x, y, size.width, size.height, anchor, blend, texture);
+        height = @max(height, size.height);
 
+        if (renderPass) |pass| {
+            try render_quad_anchor(this, pass, cursor_x, y, size.width, size.height, anchor, blend, texture);
+        }
         cursor_x += size.width;
+    }
+
+    return .{ .width = cursor_x - x, .height = height };
+}
+
+pub fn debug_render_string(this: *This, renderPass: ?*RenderPass, string: []const u8, x: f32, y: f32, blend: ?math.vec4) !text.Dim {
+    const texture = (try this.language_pack.get_texture_dyn(string)) orelse return std.mem.zeroes(text.Dim);
+    const size = try this.language_pack.get_texture_size_dyn(string);
+
+    if (renderPass) |rp| {
+        try render_quad_anchor(this, rp, x, y, size.width, size.height, .TopLeft, blend, texture);
+    }
+
+    return size;
+}
+
+pub fn debug_render_string_fmt(
+    this: *This,
+    renderPass: ?*RenderPass,
+    x: f32,
+    y: f32,
+    blend: ?math.vec4,
+    comptime fmt: []const u8,
+    args: anytype,
+) !void {
+    // stolen logic from std.fmt.format
+    const ArgsType = @TypeOf(args);
+    const args_type_info = @typeInfo(ArgsType);
+    if (args_type_info != .@"struct") {
+        @compileError("expected tuple or string argument, found " ++ @typeName(ArgsType));
+    }
+
+    const fields_info = args_type_info.@"struct".fields;
+    if (fields_info.len > 32) {
+        @compileError("32 arguments max are supported per format call");
+    }
+
+    var cursor_x = x;
+    var cursor_y = y;
+    cursor_y += 0; // TODO
+
+    @setEvalBranchQuota(2000000);
+    //comptime var arg_state: std.fmt.ArgState = .{ .args_len = fields_info.len };
+    comptime var i = 0;
+    comptime var literal: []const u8 = "";
+    comptime var arg_idx = 0;
+    inline while (true) {
+        const start_index = i;
+
+        inline while (i < fmt.len) : (i += 1) {
+            switch (fmt[i]) {
+                '{', '}' => break,
+                else => {},
+            }
+        }
+
+        comptime var end_index = i;
+        comptime var unescaped_brace = false;
+
+        if (i + 1 < fmt.len and fmt[i + 1] == fmt[i]) {
+            unescaped_brace = true;
+            end_index += 1;
+            i += 2;
+        }
+
+        literal = literal ++ fmt[start_index..end_index];
+
+        if (unescaped_brace) continue;
+
+        if (literal.len != 0) {
+            //TODO: split newline
+
+            const size = try debug_render_string(this, renderPass, literal, cursor_x, cursor_y, blend);
+
+            cursor_x += size.width;
+            literal = "";
+        }
+
+        if (i >= fmt.len) break;
+
+        if (fmt[i] == '}') {
+            @compileError("missing opening {");
+        }
+
+        comptime std.debug.assert(fmt[i] == '{');
+        i += 1;
+
+        inline while (i < fmt.len and fmt[i] != '}') : (i += 1) {}
+
+        if (i >= fmt.len) {
+            @compileError("missing closing }");
+        }
+
+        comptime std.debug.assert(fmt[i] == '}');
+        i += 1;
+
+        const arg_to_print = arg_idx;
+        arg_idx += 1;
+
+        if (fields_info.len <= arg_to_print) {
+            @compileError("too few arguments - " ++
+                std.fmt.comptimePrint("{d}", .{arg_to_print}) ++
+                " / " ++ std.fmt.comptimePrint("{d}", .{fields_info.len}));
+        }
+
+        //comptime arg_state.nextArg(null) orelse @compileError("too few arguments");
+        const arg = @field(args, fields_info[arg_to_print].name);
+
+        const value: f64 = switch (@TypeOf(arg)) {
+            f32, comptime_float => @floatCast(arg),
+            f64 => arg,
+            i32, i64, u32, u64, u8, comptime_int => @floatFromInt(arg),
+            else => @compileError("Unsupported argument type."),
+        };
+
+        const size = try render_number(this, renderPass, value, cursor_x, cursor_y, .TopLeft, blend);
+        cursor_x += size.width;
+    }
+
+    if (arg_idx < fields_info.len) {
+        const missing_count = arg_idx - fields_info.len;
+        switch (missing_count) {
+            0 => unreachable,
+            1 => @compileError("Unused argument in '" ++ fmt ++ "'"),
+            else => @compileError(std.fmt.comptimePrint("{d}", .{missing_count}) ++ " unused argument in '" ++ fmt ++ "'"),
+        }
     }
 }
 

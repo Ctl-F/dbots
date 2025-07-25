@@ -65,6 +65,29 @@ pub fn action_just_released(this: This, action: Actions) bool {
     return !this.frame[@intFromEnum(action)] and this.last_frame[@intFromEnum(action)];
 }
 
+inline fn float_from_bool(comptime T: type, v: bool) T {
+    comptime std.debug.assert(T == f32 or T == f64 or T == f128 or T == comptime_float);
+    return @as(T, @floatFromInt(@as(u1, @intFromBool(v))));
+}
+
+pub fn axis(this: This) @Vector(2, f32) {
+    const right = float_from_bool(f32, this.action_pressed(.AxisRight));
+    const left = float_from_bool(f32, this.action_pressed(.AxisLeft));
+    const up = float_from_bool(f32, this.action_pressed(.AxisUp));
+    const down = float_from_bool(f32, this.action_pressed(.AxisDown));
+
+    const axisv: @Vector(2, f32) = .{ left - right, up - down };
+
+    const len_squared: f32 = @reduce(.Add, axisv * axisv);
+    if (len_squared <= std.math.floatEps(f32)) {
+        return .{ 0.0, 0.0 };
+    }
+
+    const len: f32 = @sqrt(len_squared);
+
+    return axisv / @as(@Vector(2, f32), @splat(len));
+}
+
 pub fn process_events(this: *This) void {
     @memcpy(&this.last_frame, &this.frame);
 

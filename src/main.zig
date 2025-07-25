@@ -3,6 +3,7 @@ const host = @import("host.zig");
 const assets = @import("assets.zig");
 const math = @import("math.zig");
 const UI = @import("ui.zig");
+const Camera = @import("camera.zig");
 
 const UniformColor = extern struct {
     color: [4]f32,
@@ -153,50 +154,76 @@ pub fn main() !void {
         scene.get(host.GPUTexture, assets.Default.CheckerBoard) orelse unreachable,
     };
 
-    // const quad = scene.get(host.GPUBuffer, assets.Default.Quad) orelse unreachable;
-    // const quad_transform = math.mat4.mul(math.mat4.fromTranslate(math.vec3.new(40, 40, 0)), math.mat4.fromScale(math.vec3.new(64, 64, 1)));
-
     const gpuBuffer = scene.get(host.GPUBuffer, "floor") orelse unreachable;
 
     scene.free_resource("basic_vert");
     scene.free_resource("basic_frag");
 
+    var camera = Camera.PerspectiveCamera.init(90.0, @as(f32, @floatFromInt(options.display.width)) / @as(f32, @floatFromInt(options.display.height)), 0.01, math.vec3.up());
+
     var color: UniformColor = .{ .color = @splat(1) };
     var transform: UniformTransform = .{
-        .projection = math.mat4.perspectiveReversedZ(90.0, @as(f32, @floatFromInt(options.display.width)) / @as(f32, @floatFromInt(options.display.height)), 0.01),
-        .view = math.mat4.lookAt(math.vec3.new(0, 2, 3), math.vec3.zero(), math.vec3.up()),
+        .projection = camera.projection,
+        .view = undefined,
         .model = math.mat4.identity(),
         .magic_id = 42,
     };
 
-    // var uni_transform: UniformTransform = .{
-    //     .projection = math.mat4.orthographic(0, @floatFromInt(options.display.width), @floatFromInt(options.display.height), 0, 0.01, 1),
-    //     .view = math.mat4.fromTranslate(math.vec3.new(0, 0, 1)),
-    //     .model = quad_transform,
-    //     .magic_id = 65535,
-    // };
-
     host.input_mode(.Keyboard);
     var input = host.input();
 
-    var angle_x: f32 = 0;
-    var angle_y: f32 = 0;
-
     var ui = try UI.init(@floatFromInt(options.display.width), @floatFromInt(options.display.height), 0.01, 100.0, &scene, "main_font", .English);
-
+    try ui.debug_render_string_fmt(null, 0, 0, null, "Pitch: {}", .{0});
     //***TEMPORARY***
     try ui.language_pack.gen_textures();
-
-    var counter: u64 = 0;
 
     std.debug.print("Starting main loop\n", .{});
     app: while (!input.should_close()) {
         input.process_events();
 
-        angle_y += input.mouse_x_rel * 0.01;
-        angle_x -= input.mouse_y_rel * 0.01;
+        {
+            const move_axis = input.axis();
 
-        transform.view = math.mat4.lookAt(math.vec3.new(0, 1, -3), math.vec3.zero(), math.vec3.up());
+            const local_move = math.vec3.new(move_axis[0], 0, move_axis[1]);
+            const world_move = camera.angle.rotateVec(local_move);
+            const flat_move = math.vec3.new(world_move.x(), 0, world_move.z());
+
+            if (flat_move.lengthSq() > std.math.floatEps(f32)) {
+                const move_vector = flat_move.norm().scale(0.1);
+                camera.position = camera.position.add(move_vector);
+            }
+
+            // const forward = camera.angle.rotateVec(math.vec3.new(move_axis[0], 0, move_axis[1]));
+            // const move_vector = math.vec3.new(forward.x(), 0, forward.z()).norm().scale(0.1); // correct scale TODO: Timers and DeltaTime
+            // if (@abs(move_vector.lengthSq()) > std.math.floatEps(f32)) {
+            //     camera.position = camera.position.add(move_vector);
+            // }
+        }
+
+        {
+            const hmov = input.mouse_x_rel * 0.1;
+            const vmov = input.mouse_y_rel * 0.1;
+
+            const up = math.vec3.up();
+            const yaw_angle = -hmov;
+            const yaw_rotation = math.quat.fromAxis(yaw_angle, up);
+
+            camera.angle = math.quat.mul(yaw_rotation, camera.angle);
+
+            const right = math.quat.rotateVec(camera.angle, math.vec3.right());
+
+            var new_pitch = camera.pitch + vmov;
+            new_pitch = std.math.clamp(new_pitch, camera.pitch_min, camera.pitch_max);
+
+            const pitch_delta = new_pitch - camera.pitch;
+            camera.pitch = new_pitch;
+
+            const pitch_rotation = math.quat.fromAxis(pitch_delta, right);
+            camera.angle = math.quat.mul(pitch_rotation, camera.angle);
+            camera.angle = camera.angle.norm();
+
+            transform.view = camera.get_view();
+        }
 
         if (input.action_just_pressed(.Pause)) {
             break :app;
@@ -204,35 +231,22 @@ pub fn main() !void {
 
         const index: usize = @intFromBool(input.action_pressed(.Jump));
 
-        var renderPass = try pipeline.begin(.{ .Clear = .{ 0.0, 0.0, 0.0, 1.0 } }, .{ .Clear = undefined }, null);
+        var renderPass = try pipeline.begin(.{ .Clear = .{ 0.0, 0.0, 0.0, 1.0 } }, .{ .Clear = .{ 0.0, 0.0, 0.0, 0.0 } }, null);
         pipeline.bind_uniform_buffer(renderPass, &color, @sizeOf(UniformColor), .Fragment, 0);
         pipeline.bind_uniform_buffer(renderPass, &transform, @sizeOf(UniformTransform), .Vertex, 0);
         try pipeline.bind_texture(&renderPass, textures[index]);
         pipeline.bind_vertex_buffer(&renderPass, gpuBuffer);
 
-        // pipeline.bind_uniform_buffer(renderPass, &uni_transform, @sizeOf(UniformTransform), .Vertex, 0);
-        // try pipeline.bind_texture(&renderPass, textures[1]);
-        // pipeline.bind_vertex_buffer(&renderPass, quad);
-
         try ui.begin_ui_pass(renderPass);
 
-        try ui.render_text(&renderPass, .HelloWorld, 10, 10, math.vec4.one());
-        try ui.render_quad(&renderPass, 100, 100, 16, 16, math.vec4.one(), null);
+        try ui.debug_render_string_fmt(&renderPass, 0, 0, math.vec4.one(), "Pitch: {}", .{camera.pitch});
 
-        try ui.render_text_aligned(&renderPass, .Title, @floatFromInt(options.display.width / 2), 10, .TopCenter, math.vec4.new(1, 0, 0, 1));
-
-        try ui.render_number(&renderPass, @as(f64, @floatFromInt(counter)), 300, 150, .MiddleLeft, math.vec4.new(0, 1, 1, 1));
-        counter += 1;
         try pipeline.end(renderPass);
     }
 }
-// TODO: Test language loading (portuguese)
 // TODO: Scene
-// TODO: Finish text rendering
 // TODO: Test Camera (formaize camera)
-
 // TODO: multi-thread asset loading
 // TODO: Sound asset type
 // TODO: Level Layout asset type
 // TODO: Collisions
-// TODO: Text rendering
