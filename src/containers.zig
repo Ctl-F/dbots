@@ -1,8 +1,12 @@
 const std = @import("std");
 
+pub const SparseKey = usize;
+
 pub fn SparseSet(comptime T: type) type {
     return struct {
         const This = @This();
+
+        pub const Key = SparseKey;
 
         sparse: std.ArrayList(?usize), // holds index of item in dense array
         holes: std.ArrayList(usize), // stack of empty sparse slots to avoid a linear search
@@ -19,6 +23,15 @@ pub fn SparseSet(comptime T: type) type {
             };
         }
 
+        pub fn initCapacity(allocator: std.mem.Allocator, capacity: usize) !This {
+            return This{
+                .sparse = try std.ArrayList(?usize).initCapacity(allocator, capacity),
+                .holes = try std.ArrayList(usize).initCapacity(allocator, capacity),
+                .dense = try std.ArrayList(T).initCapacity(allocator, capacity),
+                .back_map = try std.ArrayList(usize).initCapacity(allocator, capacity),
+            };
+        }
+
         pub fn deinit(this: *This) void {
             this.sparse.deinit();
             this.holes.deinit();
@@ -26,7 +39,7 @@ pub fn SparseSet(comptime T: type) type {
             this.back_map.deinit();
         }
 
-        pub fn add(this: *This, entity: T) !usize {
+        pub fn add(this: *This, entity: T) !Key {
             // we don't allow holes in the dense array so insert should
             // literally just be an append to the dense array
             const dense_index = this.dense.items.len;
@@ -45,14 +58,14 @@ pub fn SparseSet(comptime T: type) type {
             return sparse_index;
         }
 
-        pub fn get(this: *This, index: usize) ?T {
+        pub fn get(this: *This, index: Key) ?T {
             if (this.get_ptr(index)) |ptr| {
                 return ptr.*;
             }
             return null;
         }
 
-        pub fn get_ptr(this: *This, index: usize) ?*T {
+        pub fn get_ptr(this: *This, index: Key) ?*T {
             if (!this.contains(index)) return null;
 
             const dense_index = this.sparse.items[index].?;
@@ -62,11 +75,11 @@ pub fn SparseSet(comptime T: type) type {
             return &this.dense.items[dense_index];
         }
 
-        pub inline fn contains(this: This, index: usize) bool {
+        pub inline fn contains(this: This, index: Key) bool {
             return index < this.sparse.items.len and this.sparse.items[index] != null;
         }
 
-        pub fn remove(this: *This, index: usize) void {
+        pub fn remove(this: *This, index: Key) void {
             if (!this.contains(index)) {
                 return;
             }
