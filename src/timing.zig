@@ -8,7 +8,7 @@ pub const Timer = struct {
 
     pub fn start() This {
         return This{
-            .timestamp = host.sdl.sdl_GetPerformanceCounter(),
+            .timestamp = host.sdl.SDL_GetPerformanceCounter(),
         };
     }
 

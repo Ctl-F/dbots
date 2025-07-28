@@ -4,6 +4,9 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    std.debug.print("Begin Build Script\n", .{});
+    std.debug.print("Create Module 'main'\n", .{});
+
     // We will also create a module for our other entry point, 'main.zig'.
     const exe_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
@@ -16,8 +19,13 @@ pub fn build(b: *std.Build) void {
         .root_module = exe_mod,
     });
 
+
+    std.debug.print("Linking zig dependencies\n", .{});
+
     const zalgebra = b.dependency("zalgebra", .{}).module("zalgebra");
     exe.root_module.addImport("zalgebra", zalgebra);
+
+    std.debug.print("Linking C dependencies\n", .{});
 
     exe.linkLibC();
     exe.linkSystemLibrary("SDL3");
@@ -26,6 +34,8 @@ pub fn build(b: *std.Build) void {
     exe.addIncludePath(b.path("src/c/"));
 
     build_shaders(b, exe) catch unreachable;
+
+    std.debug.print("Install Artifact\n", .{});
 
     b.installArtifact(exe);
 

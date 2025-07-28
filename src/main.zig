@@ -4,6 +4,7 @@ const assets = @import("assets.zig");
 const math = @import("math.zig");
 const UI = @import("ui.zig");
 const Camera = @import("camera.zig");
+const Time = @import("timing.zig");
 
 const UniformColor = extern struct {
     color: [4]f32,
@@ -18,7 +19,7 @@ const UniformTransform = extern struct {
 
 pub fn main() !void {
     const options = host.InitOptions{
-        .display = .{ .width = 1280, .height = 800, .monitor = null },
+        .display = .{ .width = 800, .height = 600, .monitor = null },
         .title = "Deathbots",
     };
     std.debug.print("Initializing\n", .{});
@@ -80,9 +81,9 @@ pub fn main() !void {
         },
         assets.ResourceRequest{
             .asset_name = "main_font",
-            .asset_source = "fonts/DUNSTA__.TTF",
+            .asset_source = "fonts/8bitOperatorPlus-Bold.ttf",
             .type = .{
-                .font = .{ .size = 20 },
+                .font = .{ .size = 16 },
             },
         },
         assets.ResourceRequest{
@@ -195,14 +196,17 @@ pub fn main() !void {
     var input = host.input();
 
     var ui = try UI.init(@floatFromInt(options.display.width), @floatFromInt(options.display.height), 0.01, 100.0, &scene, "main_font", .English);
-    try ui.debug_render_string_fmt(null, 0, 0, null, "Pitch: {}", .{0});
+    try ui.debug_render_string_fmt(null, 0, 0, null, "FrameTime: {} - Pitch: {}", .{ 0, 0 });
     //***TEMPORARY***
     try ui.language_pack.gen_textures();
 
     std.debug.print("Starting main loop\n", .{});
+
+    var timer = Time.Timer.start();
+
     app: while (!input.should_close()) {
         input.process_events();
-
+        const dt = timer.delta();
         {
             const move_axis = input.axis();
 
@@ -266,11 +270,15 @@ pub fn main() !void {
         try pipeline.bind_texture(&renderPass, textures[1]);
         pipeline.bind_vertex_buffer(&renderPass, cube);
 
-        try ui.begin_ui_pass(renderPass);
-
-        try ui.debug_render_string_fmt(&renderPass, 0, 0, math.vec4.one(), "Pitch: {}", .{camera.pitch});
+        //try ui.begin_ui_pass(renderPass);
 
         try pipeline.end(renderPass);
+
+        var uirp = try ui.pipeline.begin(.{ .Clear = @splat(0) }, .DontCare, null);
+
+        try ui.debug_render_string_fmt(&uirp, 0, 0, math.vec4.one(), "FrameTime: {} - Pitch: {}", .{ dt, camera.pitch });
+
+        try ui.pipeline.end(uirp);
     }
 }
 // TODO: Scene

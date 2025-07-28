@@ -87,6 +87,16 @@ pub fn init(options: InitOptions) !void {
 
     gpu_device = sdl.SDL_CreateGPUDevice(sdl.SDL_GPU_SHADERFORMAT_SPIRV, builtin.mode == .Debug or builtin.mode == .ReleaseSafe, null);
 
+    //pub extern fn SDL_GetNumGPUDrivers() c_int;
+    //pub extern fn SDL_GetGPUDriver(index: c_int) [*c]const u8;
+    //pub extern fn SDL_GetGPUDeviceDriver(device: ?*SDL_GPUDevice) [*c]const u8;
+
+    const num = sdl.SDL_GetNumGPUDrivers();
+    for (0..@as(usize, @intCast(num))) |i| {
+        const name = sdl.SDL_GetGPUDriver(@intCast(i));
+        std.debug.print(" -- {}) {s}\n", .{ i, name });
+    }
+
     if (gpu_device == null) {
         return sdl_debug_error("device create");
     }
@@ -509,6 +519,9 @@ pub const Pipeline = struct {
                 return error.UnableToObtainCommandBuffer;
             }
 
+            // THIS NEEDS TO BE OPTIONAL IN ORDER TO SUPPORT MULTIPLE RENDER PASSES
+            // Basically you need to allow a new renderpass to begin
+            // but to be able to reference this same swapchain
             if (!sdl.SDL_WaitAndAcquireGPUSwapchainTexture(rp.command_buffer, windowptr, &rp.swapchain_texture, null, null)) {
                 return error.UnableToObtainSwapchainTexture;
             }
