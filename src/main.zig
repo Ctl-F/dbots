@@ -19,7 +19,7 @@ const UniformTransform = extern struct {
 
 pub fn main() !void {
     const options = host.InitOptions{
-        .display = .{ .width = 800, .height = 600, .monitor = null },
+        .display = .{ .width = 800, .height = 600, .monitor = null, .vsync = false },
         .title = "Deathbots",
     };
     std.debug.print("Initializing\n", .{});
@@ -81,7 +81,7 @@ pub fn main() !void {
         },
         assets.ResourceRequest{
             .asset_name = "main_font",
-            .asset_source = "fonts/8bitOperatorPlus-Bold.ttf",
+            .asset_source = "fonts/DUNSTA__.TTF",
             .type = .{
                 .font = .{ .size = 16 },
             },
@@ -259,7 +259,7 @@ pub fn main() !void {
 
         transform.model = math.mat4.identity();
 
-        var renderPass = try pipeline.begin(.{ .Clear = .{ 0.0, 0.0, 0.0, 1.0 } }, .{ .Clear = .{ 0.0, 0.0, 0.0, 0.0 } }, null);
+        var renderPass = try pipeline.begin(.{ .colorOp = .{ .Clear = .{ 0.0, 0.0, 0.0, 1.0 } }, .depthOp = .{ .Clear = .{ 0.0, 0.0, 0.0, 0.0 } } }, null);
         pipeline.bind_uniform_buffer(renderPass, &color, @sizeOf(UniformColor), .Fragment, 0);
         pipeline.bind_uniform_buffer(renderPass, &transform, @sizeOf(UniformTransform), .Vertex, 0);
         try pipeline.bind_texture(&renderPass, textures[index]);
@@ -272,13 +272,13 @@ pub fn main() !void {
 
         //try ui.begin_ui_pass(renderPass);
 
-        try pipeline.end(renderPass);
+        try pipeline.end(&renderPass);
 
-        var uirp = try ui.pipeline.begin(.{ .Clear = @splat(0) }, .DontCare, null);
+        var uirp = try ui.pipeline.begin(.{ .colorOp = .Load, .depthOp = null }, renderPass);
 
         try ui.debug_render_string_fmt(&uirp, 0, 0, math.vec4.one(), "FrameTime: {} - Pitch: {}", .{ dt, camera.pitch });
 
-        try ui.pipeline.end(uirp);
+        try ui.pipeline.end(&uirp);
     }
 }
 // TODO: Scene

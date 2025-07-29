@@ -6,55 +6,36 @@ const containers = @import("containers.zig");
 
 pub const ComponentID = usize;
 
-const DEFAULT_MAX_LIMIT: usize = 1000;
+const DEFAULT_NUM: usize = 1000;
 
 pub const Renderable = struct {
+    pub const UniformFunc = *const fn (this: *Renderable, renderPass: *host.RenderPass) void;
+
     mesh_key: []const u8,
     texture_key: []const u8,
-    pipeline: ?host.PipelineID,
-
-    projection_id: ComponentID,
-    view_id: ComponentID,
-    model_id: ComponentID,
+    uniform_func: UniformFunc,
 };
 
-pub const Matrix4 = math.mat4;
+pub const Collider = union(enum) {};
 
 pub const Transform = struct {
     position: math.vec3,
+    rotation: math.vec3,
     scale: math.vec3,
-    rotation: math.quat,
-
-    pub fn to_mat4(this: @This()) Matrix4 {
-        _ = this;
-        unreachable; //todo
-    }
-};
-
-pub const ComponentTypes = enum {
-    Renderable,
-    Matrix4,
-    Transform,
-};
-
-pub const ComponentFlags = packed struct {
-    has_renderable: bool,
-    has_matrix4: bool,
-    has_transform: bool,
-};
-
-pub const Components = struct {
-    renderable: ?containers.SparseKey,
-    matrix4: ?containers.SparseKey,
-    transform: ?containers.SparseKey,
 };
 
 pub const Entity = struct {
-    component_flags: ComponentFlags,
-    components: Components,
+    transform: Transform,
+    renderable: ?ComponentID,
+    collider: ?ComponentID,
 };
 
-var glob_renderable_list = containers.SparseSet(Renderable).initCapacity(host.MemAlloc, DEFAULT_MAX_LIMIT) catch unreachable;
-var glob_matrix_list = containers.SparseSet(Matrix4).initCapacity(host.MemAlloc, DEFAULT_MAX_LIMIT) catch unreachable;
-var glob_transform_list = containers.SparseSet(Transform).initCapacity(host.MemAlloc, DEFAULT_MAX_LIMIT) catch unreachable;
-var glob_entities_list = containers.SparseSet(Entity).init(host.MemAlloc);
+pub const Registry = struct {
+    renderables: containers.SparseSet(Renderable),
+    colliders: containers.SparseSet(Collider),
+    entities: containers.SparseSet(Entity),
+};
+
+//var glob_renderable_list = containers.SparseSet(Renderable).initCapacity(host.MemAlloc, DEFAULT_NUM) catch unreachable;
+//var glob_colliders_list = containers.SparseSet(Collider).initCapacity(host.MemAlloc, DEFAULT_NUM) catch unreachable;
+//var glob_entities_list = containers.SparseSet(Entity).initCapacity(host.MemAlloc, DEFAULT_NUM) catch unreachable;

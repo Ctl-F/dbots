@@ -56,6 +56,7 @@ pub const InitOptions = struct {
         width: u32,
         height: u32,
         monitor: ?u32,
+        vsync: bool,
     },
     title: [*c]const u8,
 };
@@ -108,6 +109,20 @@ pub fn init(options: InitOptions) !void {
 
     if (!sdl.SDL_ClaimWindowForGPUDevice(gpu_device, windowptr)) {
         return sdl_debug_error("Claim Window for GPU");
+    }
+
+    //SDL seems to enable vsync by default
+    // so we need to explicitly try to disable it
+    if (!options.display.vsync) VSYNC: {
+        if (sdl.SDL_WindowSupportsGPUPresentMode(gpu_device, windowptr, sdl.SDL_GPU_PRESENTMODE_MAILBOX)) {
+            if (sdl.SDL_SetGPUSwapchainParameters(gpu_device, windowptr, sdl.SDL_GPU_SWAPCHAINCOMPOSITION_SDR, sdl.SDL_GPU_PRESENTMODE_MAILBOX)) {
+                std.debug.print("Mailbox mode enabled for graphics. Vsync is now disabled\n", .{});
+                break :VSYNC;
+            }
+            // fallthrough to error message if this fails
+        }
+
+        std.debug.print("Vsync disable requested, alternative mode not supported by your GPU, Vsync is enabled. This may cap your FPS\n", .{});
     }
 }
 
@@ -373,6 +388,7 @@ pub const Pipeline = struct {
         swapchain_texture: ?*sdl.SDL_GPUTexture,
         frame_textures: []TextureSamplerInfo = &.{},
         texture_buffer: [MAX_RENDERPASS_TEXTURE_COUNT]TextureSamplerInfo = undefined,
+        in_flight: bool,
 
         const TextureSamplerInfo = struct {
             texture: GPUTexture,
@@ -499,19 +515,35 @@ pub const Pipeline = struct {
         DontCare,
     };
 
+    pub const RenderPassLoad = struct {
+        colorOp: RenderPassLoadOp,
+        depthOp: ?RenderPassLoadOp,
+    };
+
     /// if existing is null then a new renderpass will be started
     /// if you need multiple pipeline calls per renderpass you can pass the existing render pass in and the
     /// renderpass initialization will be skipped. any .end() from any pipeline for any renderpass started from
     /// any pipeline should be valid, only testing will confirm.
     /// NOTE: Should probably rethink this design and interface a little more
-    pub fn begin(this: This, loadOp: RenderPassLoadOp, depthLoadOp: ?RenderPassLoadOp, existing: ?RenderPass) !RenderPass {
-        const renderPass = existing orelse init: {
+    pub fn begin(this: This, loadOp: RenderPassLoad, existing: ?RenderPass) !RenderPass {
+        if (existing) |renderPass| {
+            std.debug.assert(!renderPass.in_flight);
+            return try this.begin_target_swapchain(loadOp, renderPass.swapchain_texture);
+        }
+        return try this.begin_target_swapchain(loadOp, null);
+    }
+
+    /// not a true subpass - existing renderpass needs to be closed
+    /// will target the same swapchain image
+    pub fn begin_target_swapchain(this: This, loadOp: RenderPassLoad, swapchain: ?*sdl.SDL_GPUTexture) !RenderPass {
+        const renderPass = init: {
             var rp = RenderPass{
                 .command_buffer = null,
                 .render_pass = null,
                 .swapchain_texture = null,
                 .frame_textures = &.{},
                 .texture_buffer = undefined,
+                .in_flight = true,
             };
 
             rp.command_buffer = sdl.SDL_AcquireGPUCommandBuffer(gpu_device);
@@ -519,18 +551,19 @@ pub const Pipeline = struct {
                 return error.UnableToObtainCommandBuffer;
             }
 
-            // THIS NEEDS TO BE OPTIONAL IN ORDER TO SUPPORT MULTIPLE RENDER PASSES
-            // Basically you need to allow a new renderpass to begin
-            // but to be able to reference this same swapchain
-            if (!sdl.SDL_WaitAndAcquireGPUSwapchainTexture(rp.command_buffer, windowptr, &rp.swapchain_texture, null, null)) {
-                return error.UnableToObtainSwapchainTexture;
+            if (swapchain) |sw| {
+                rp.swapchain_texture = sw;
+            } else {
+                if (!sdl.SDL_WaitAndAcquireGPUSwapchainTexture(rp.command_buffer, windowptr, &rp.swapchain_texture, null, null)) {
+                    return error.UnableToObtainSwapchainTexture;
+                }
             }
 
             var colorTargetInfo = std.mem.zeroes(sdl.SDL_GPUColorTargetInfo);
             colorTargetInfo.texture = rp.swapchain_texture;
             colorTargetInfo.store_op = sdl.SDL_GPU_STOREOP_STORE;
 
-            switch (loadOp) {
+            switch (loadOp.colorOp) {
                 .Clear => |clearColor| {
                     colorTargetInfo.load_op = sdl.SDL_GPU_LOADOP_CLEAR;
                     colorTargetInfo.clear_color = sdl.SDL_FColor{ .r = clearColor[0], .g = clearColor[1], .b = clearColor[2], .a = clearColor[3] };
@@ -549,7 +582,7 @@ pub const Pipeline = struct {
                 dti.clear_depth = 0.0; // because of matrix this needs to be zero not 1
                 dti.clear_stencil = 0;
                 dti.load_op = load_op: {
-                    if (depthLoadOp) |dlo| {
+                    if (loadOp.depthOp) |dlo| {
                         switch (dlo) {
                             .Clear => break :load_op sdl.SDL_GPU_LOADOP_CLEAR,
                             .Load => break :load_op sdl.SDL_GPU_LOADOP_LOAD,
@@ -581,6 +614,9 @@ pub const Pipeline = struct {
     /// uniforms and textures need to be bound before calling this
     pub fn bind_vertex_buffer(this: This, renderPass: *RenderPass, buffer: GPUBuffer) void {
         ////std.debug.print("This: {}\nRenderPass: {}\nBuffer: {}\n", .{ this, renderPass, buffer });
+
+        std.debug.assert(renderPass.in_flight);
+
         _ = this;
         if (renderPass.frame_textures.len != 0) {
             if (builtin.mode == .Debug) {
@@ -597,14 +633,11 @@ pub const Pipeline = struct {
                     .texture = tex.texture.handle,
                     .sampler = tex.texture.sampler,
                 };
-                //std.debug.print("Binding texture: {}|{}\n", .{ tex.texture.handle, tex.texture.sampler });
             }
 
             sdl.SDL_BindGPUFragmentSamplers(renderPass.render_pass, 0, &textures[0], @intCast(renderPass.frame_textures.len));
             renderPass.frame_textures = &.{};
         }
-
-        //std.debug.print("Binding vertex buffer: {}\n", .{buffer.handle});
 
         const buffers = [_]sdl.SDL_GPUBufferBinding{
             sdl.SDL_GPUBufferBinding{
@@ -615,19 +648,18 @@ pub const Pipeline = struct {
 
         sdl.SDL_BindGPUVertexBuffers(renderPass.render_pass, 0, &buffers[0], 1);
 
-        //std.debug.print("Draw primitives\n", .{});
         sdl.SDL_DrawGPUPrimitives(renderPass.render_pass, buffer.count, 1, 0, 0);
     }
 
     pub fn bind_uniform_buffer(this: This, renderPass: RenderPass, buffer: *const anyopaque, size: usize, stage: assets.Shader.Stage, slot: u32) void {
+        std.debug.assert(renderPass.in_flight);
+
         _ = this;
         switch (stage) {
             .Vertex => {
-                //std.debug.print("Bind vertex uniform data\n", .{});
                 sdl.SDL_PushGPUVertexUniformData(renderPass.command_buffer, @intCast(slot), buffer, @intCast(size));
             },
             .Fragment => {
-                //std.debug.print("Bind fragment uniform data\n", .{});
                 sdl.SDL_PushGPUFragmentUniformData(renderPass.command_buffer, @intCast(slot), buffer, @intCast(size));
             },
         }
@@ -637,11 +669,14 @@ pub const Pipeline = struct {
     /// that the bind_texture commands will actually be recorded. This will just group them together for
     /// bulk binding
     pub fn bind_texture(this: This, renderPass: *RenderPass, texture: GPUTexture) !void {
+        std.debug.assert(renderPass.in_flight);
+
         return this.bind_texture_slot(renderPass, texture, null);
     }
 
     pub fn bind_texture_slot(this: This, renderPass: *RenderPass, texture: GPUTexture, slot: ?u32) !void {
         _ = this;
+        std.debug.assert(renderPass.in_flight);
 
         if (renderPass.frame_textures.len >= MAX_RENDERPASS_TEXTURE_COUNT) {
             return error.RENDERPASS_TEXTURE_LIMIT_EXCEEDED;
@@ -655,18 +690,20 @@ pub const Pipeline = struct {
         renderPass.frame_textures = renderPass.texture_buffer[0 .. index + 1];
     }
 
-    pub fn end(this: This, renderPass: RenderPass) !void {
+    pub fn end(this: This, renderPass: *RenderPass) !void {
+        std.debug.assert(renderPass.in_flight);
+
         _ = this;
-        //std.debug.print("Render Pass End", .{});
+
         sdl.SDL_EndGPURenderPass(renderPass.render_pass);
-        //std.debug.print("Command Buffer Submit", .{});
+        renderPass.in_flight = false;
+
         if (!sdl.SDL_SubmitGPUCommandBuffer(renderPass.command_buffer)) {
             return error.CouldNotSubmitCommandBuffer;
         }
     }
 
     pub fn free(this: This) void {
-        //std.debug.print("Pipeline free", .{});
         sdl.SDL_ReleaseGPUGraphicsPipeline(gpu_device, this.handle);
     }
 };
@@ -1338,46 +1375,4 @@ pub const GPUPixelFormat = enum {
 };
 
 pub const INTERNAL_PIXEL_FORMAT = sdl.SDL_PIXELFORMAT_RGBA8888;
-//pub const INTERNAL_GPU_PIXEL_FORMAT = sdl.SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
 pub const BYTES_PER_PIXEL = 4;
-
-// pub fn create(texture: assets.SoftwareTexture, samplerInfo: GPUSamplerInfo) !This {
-//     const sampler = sdl.SDL_CreateGPUSampler(gpu_device, .{
-//         .min_filter = samplerInfo.min_filter.convert(),
-//         .mag_filter = samplerInfo.mag_filter.convert(),
-//         .address_mode_u = samplerInfo.address_policy.convert(),
-//         .address_mode_v = samplerInfo.address_policy.convert(),
-//         .address_mode_w = samplerInfo.address_policy.convert(),
-//         .mipmap_mode = samplerInfo.mipmap_filter.convert_mm(),
-//     });
-
-//     if (sampler == null) {
-//         return error.CouldNotCreateSampler;
-//     }
-//     errdefer sdl.SDL_ReleaseGPUSampler(gpu_device, sampler);
-
-//     const tex = sdl.SDL_CreateGPUTexture(gpu_device, .{
-//         .type = sdl.SDL_GPU_TEXTURETYPE_2D,
-//         .format = sdl.SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
-//         .width = texture.surface.*.w,
-//         .height = texture.surface.*.h,
-//         .layer_count_or_depth = 1,
-//         .num_levels = 1,
-//         .usage = sdl.SDL_GPU_TEXTUREUSAGE_SAMPLER,
-//     });
-
-//     if (tex == null) {
-//         return error.CouldNotUploadGPUTexture;
-//     }
-//     errdefer sdl.SDL_ReleaseGPUTexture(tex);
-
-//     if (samplerInfo.texture_name) |name| {
-//         sdl.SDL_SetGPUTextureName(gpu_device, tex, name);
-//     }
-
-//     return This{
-//         .handle = tex,
-//         .sampler = sampler,
-//         .enable_mipmaps = samplerInfo.enable_mipmaps,
-//     };
-//}
