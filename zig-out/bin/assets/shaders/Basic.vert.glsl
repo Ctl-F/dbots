@@ -12,7 +12,6 @@ layout(set = 1, binding = 0) uniform Transform {
     mat4 projection;
     mat4 view;
     mat4 model;
-    float magic_id;
 };
 
 void main() {

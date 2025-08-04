@@ -14,7 +14,6 @@ const UniformTransform = extern struct {
     projection: math.mat4,
     view: math.mat4,
     model: math.mat4,
-    magic_id: f32,
 };
 
 pub fn main() !void {
@@ -189,7 +188,6 @@ pub fn main() !void {
         .projection = camera.projection,
         .view = undefined,
         .model = math.mat4.identity(),
-        .magic_id = 42,
     };
 
     host.input_mode(.Keyboard);

@@ -7,6 +7,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const assets = @import("assets.zig");
 const fixed_list = @import("fixed_list.zig");
+const math = @import("math.zig");
 
 pub const Input = @import("input.zig");
 
@@ -244,6 +245,143 @@ pub const VertexElement = enum(u32) {
         return this.element_count() * this.element_size_bytes();
     }
 };
+
+var __DebugPipeline: ?Pipeline = null;
+var __DebugFmt: ?VertexFormat = null;
+var __DebugCube: []u8 = "__DebugWireframeCube__";
+var __DebugProjection = math.mat4.identity();
+var __DebugView = math.mat4.identity();
+var __DebugCubeHandle: ?GPUBuffer = null;
+
+pub fn set_debug_view(view: math.mat4) void {
+    __DebugView = view;
+}
+
+pub fn set_debug_projection(projection: math.mat4) void {
+    __DebugProjection = projection;
+}
+
+pub fn init_debug_pipeline(scene: *assets.SceneResources) !void {
+    __DebugFmt = VertexFormat.begin();
+    try __DebugFmt.?.add(.Float3);
+    try __DebugFmt.?.Add(.Float3);
+
+    const pipelineInfo = PipelineConfig{
+        .vertex_shader = scene.get(assets.Shader, assets.Default.DebugShaderVertex).?,
+        .fragment_shader = scene.get(assets.Shader, assets.Default.DebugShaderFragment).?,
+        .topology = .LineList,
+        .vertex_format = __DebugFmt.?,
+        .enable_culling = false,
+        .blend_mode = .Disabled,
+    };
+    __DebugPipeline = try Pipeline.init(pipelineInfo);
+    errdefer __DebugPipeline.?.free();
+
+    // wireframe cube from (0,0,0) to (1,1,1) with color3(white)
+    const DebugCube = [_]f32{
+        0.0, 0.0, 0.0, 1.0, 1.0, 1.0,
+        1.0, 0.0, 0.0, 1.0, 1.0, 1.0,
+        1.0, 0.0, 0.0, 1.0, 1.0, 1.0,
+        1.0, 1.0, 0.0, 1.0, 1.0, 1.0,
+        1.0, 1.0, 0.0, 1.0, 1.0, 1.0,
+        0.0, 1.0, 0.0, 1.0, 1.0, 1.0,
+        0.0, 1.0, 0.0, 1.0, 1.0, 1.0,
+        0.0, 0.0, 0.0, 1.0, 1.0, 1.0,
+
+        0.0, 0.0, 1.0, 1.0, 1.0, 1.0,
+        1.0, 0.0, 1.0, 1.0, 1.0, 1.0,
+        1.0, 0.0, 1.0, 1.0, 1.0, 1.0,
+        1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+        1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+        0.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+        0.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+        0.0, 0.0, 1.0, 1.0, 1.0, 1.0,
+
+        0.0, 0.0, 0.0, 1.0, 1.0, 1.0,
+        0.0, 0.0, 1.0, 1.0, 1.0, 1.0,
+        1.0, 0.0, 0.0, 1.0, 1.0, 1.0,
+        1.0, 0.0, 1.0, 1.0, 1.0, 1.0,
+        1.0, 1.0, 0.0, 1.0, 1.0, 1.0,
+        1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+        0.0, 1.0, 0.0, 1.0, 1.0, 1.0,
+        0.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+    };
+
+    const bufferInfo = BufferCreateInfo{
+        .usage = .Vertex,
+        .element_size = @sizeOf(f32) * 6,
+        .num_elements = DebugCube.len,
+        .dynamic_upload = false,
+        .texture_info = null,
+    };
+    const stageInfo = try begin_stage_buffer(bufferInfo);
+    var buffer = try map_stage_buffer(f32, stageInfo);
+
+    @memcpy(buffer[0..DebugCube.len], &DebugCube);
+
+    var copyPass = CopyPass.init(MemAlloc);
+    defer copyPass.deinit();
+
+    try copyPass.add_stage_buffer(stageInfo, __DebugCube);
+    try copyPass.submit();
+
+    try scene.claim_copy_result(GPUBuffer, copyPass, __DebugCube);
+    copyPass.claim_ownership_of_results();
+
+    __DebugCubeHandle = scene.get(GPUBuffer, __DebugCube);
+}
+
+pub fn debug_pipeline_begin(renderPass: *Pipeline.RenderPass) !void {
+    if (__DebugPipeline) |*pipeline| {
+        try pipeline.begin(.{ .colorOp = .Load, .depthOp = .Load }, renderPass);
+    } else {
+        std.debug.print("DebugPipeline not initialized\n", .{});
+        unreachable;
+    }
+}
+
+pub fn debug_pipeline_add(renderPass: *Pipeline.RenderPass, position: @Vector(3, f32), size: @Vector(3, f32), color: @Vector(3, f32)) !void {
+    if (__DebugPipeline) |*pipeline| {
+        if (__DebugCubeHandle == null) return error.DebugCubeNotAvailable;
+
+        const uniform_color: extern struct { color: [3]f32 } = .{ .color = color };
+        const transform = math.mat4.translate(math.vec3.fromSlice(&position), math.mat4.fromScale(size[0], size[1], size[2]));
+
+        const uniform_transform: extern struct { projection: math.mat4, view: math.mat4, model: math.mat4 } = .{
+            .projection = __DebugProjection,
+            .view = __DebugView,
+            .model = transform,
+        };
+
+        pipeline.bind_uniform_buffer(renderPass, &uniform_transform, @sizeOf(@TypeOf(uniform_transform)), .Vertex, 0);
+        pipeline.bind_uniform_buffer(renderPass, &uniform_color, @sizeOf(@TypeOf(uniform_color)), .Fragment, 0);
+        pipeline.bind_vertex_buffer(renderPass, __DebugCubeHandle.?);
+    } else {
+        unreachable;
+    }
+}
+
+//TODO: debug shader
+// TODO: Test
+// TODO: Implement debug draw on spatial tree for partions
+// TODO: Test spatial tree
+
+pub fn debug_pipeline_present(renderPass: *Pipeline.RenderPass) !void {
+    if (__DebugPipeline) |*pipeline| {
+        try pipeline.end(renderPass);
+    }
+}
+
+pub fn deinit_debug_pipeline(scene: *assets.SceneResources) void {
+    if (__DebugCubeHandle != null) {
+        scene.free_resource(__DebugCube); // will call release for __DebugCubeHandle
+        __DebugCubeHandle = null;
+    }
+
+    if (__DebugPipeline) |pipeline| {
+        pipeline.free();
+    }
+}
 
 pub const VertexFormatSpecifier = struct {
     type: VertexElement,

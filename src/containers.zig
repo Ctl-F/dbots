@@ -297,8 +297,14 @@ pub fn FixedSpatialTree(comptime T: type, comptime interface: *fn (*T) Dim3D, co
             return this.find_in_bucket(results, area, 0);
         }
 
+        /// searches the bucket for instances that overlap with area
+        /// returns number of instances added to results
         fn find_in_bucket(this: This, results: []?*T, area: Dim3D, bucket: usize) usize {
             const this_bucket = this.buckets[bucket];
+
+            if (results.len == 0) {
+                return 0;
+            }
 
             if (bucket == 0 and !area.overlaps(bucket)) {
                 return 0;
@@ -340,17 +346,24 @@ pub fn FixedSpatialTree(comptime T: type, comptime interface: *fn (*T) Dim3D, co
             return index;
         }
 
-        pub fn raycast(this: This, ray_origin: math.vec3, ray_dir: math.vec3) ?*T {
-            return this.raycast_bucket(ray_origin, ray_dir.norm(), 0, null, null);
+        pub const RaycastResult = struct {
+            instance: ?*T,
+            distance: ?f32,
+        };
+
+        pub fn raycast(this: This, ray_origin: math.vec3, ray_dir: math.vec3) RaycastResult {
+            var result: RaycastResult = .{ .instance = null, .distance = null };
+            this.raycast_bucket(ray_origin, ray_dir.norm(), 0, &result);
+            return result;
         }
 
-        fn raycast_bucket(this: This, origin: math.vec3, dir: math.vec3, bucket: usize, best_hit: ?*T, best_distance: ?f32) ?*T {
-            if (bucket >= this.buckets.len) return best_hit;
+        fn raycast_bucket(this: This, origin: math.vec3, dir: math.vec3, bucket: usize, best_result: *RaycastResult) void {
+            if (bucket >= this.buckets.len) return;
 
             const this_bucket = &this.buckets[bucket];
 
             if (!ray_intersect_aabb(origin, dir, this_bucket.field)) {
-                return best_hit; // skip bucket entirely
+                return; // skip bucket entirely
             }
             var iterator = this_bucket.instances.iterator();
 
@@ -359,11 +372,12 @@ pub fn FixedSpatialTree(comptime T: type, comptime interface: *fn (*T) Dim3D, co
                 const instance = this.instances.get_ptr(key).?;
 
                 const aabb = interface(instance);
-                if (ray_intersect_aabb(origin, dir, aabb)) {
-                    const dist = distance_to_aabb(origin, dir, aabb);
-                    if (best_distance == null or dist < best_distance.?) {
-                        best_hit = instance;
-                        best_distance = dist;
+                const info = ray_intersect_aabb_info(origin, dir, aabb);
+                if (info.intersect) {
+                    const dist = info.distance;
+                    if (best_result.distance == null or dist < best_result.distance.?) {
+                        best_result.instance = instance;
+                        best_result.distance = dist;
                     }
                 }
             }
@@ -371,25 +385,60 @@ pub fn FixedSpatialTree(comptime T: type, comptime interface: *fn (*T) Dim3D, co
             const bLeft = Bucket.Left(bucket);
             const bRight = Bucket.right(bucket);
 
-            if (left < this.buckets.len) {
-                best_hit = this.raycast_bucket(origin, dir, bLeft, best_hit, best_distance) orelse best_hit;
+            //Improvements:
+            // Return a list of results sorted by distance
+            // check buckets in order of closest to furthest
+
+            if (bLeft < this.buckets.len) {
+                this.raycast_bucket(origin, dir, bLeft, best_result);
             }
 
-            if (right < this.buckets.len) {
-                best_hit = this.raycast_bucket(origin, dir, bRight, best_hit, best_distance) orelse best_hit;
+            if (bRight < this.buckets.len) {
+                this.raycast_bucket(origin, dir, bRight, best_result);
             }
-
-            return best_hit;
         }
 
-        fn distance_to_aabb(origin: math.vec3, dir: math.vec3, aabb: Dim3D) f32 {}
+        const RayIntersectInfo = struct { intersect: bool, distance: f32 };
+
+        fn ray_intersect_aabb_info(origin: math.vec3, dir: math.vec3, aabb: Dim3D) RayIntersectInfo {
+            const inv_dir = math.vec3.one().div(dir);
+
+            const min = aabb.position;
+            const max = aabb.position.add(aabb.size);
+
+            const t1 = (min.x() - origin.x()) * inv_dir.x();
+            const t2 = (max.x() - origin.x()) * inv_dir.x();
+            const t3 = (min.y() - origin.y()) * inv_dir.y();
+            const t4 = (max.y() - origin.y()) * inv_dir.y();
+            const t5 = (min.z() - origin.z()) * inv_dir.z();
+            const t6 = (max.z() - origin.z()) * inv_dir.z();
+
+            const tmin = @max(@min(t1, t2), @min(t3, t4), @min(t5, t6));
+            const tmax = @min(@max(t1, t2), @max(t3, t4), @max(t5, t6));
+
+            return .{ .intersect = tmax >= @max(tmin, 0.0), .distance = @max(tmin, 0.0) };
+        }
+
+        fn ray_distance_to_aabb(origin: math.vec3, dir: math.vec3, aabb: Dim3D) f32 {
+            const inv_dir = math.vec3.one().div(dir);
+
+            const min = aabb.position;
+            const max = aabb.position.add(aabb.size);
+
+            const t1 = (min.x() - origin.x()) * inv_dir.x();
+            const t2 = (max.x() - origin.x()) * inv_dir.x();
+            const t3 = (min.y() - origin.y()) * inv_dir.y();
+            const t4 = (max.y() - origin.y()) * inv_dir.y();
+            const t5 = (min.z() - origin.z()) * inv_dir.z();
+            const t6 = (max.z() - origin.z()) * inv_dir.z();
+
+            const tmin = @max(@min(t1, t2), @min(t3, t4), @min(t5, t6));
+            return @max(tmin, 0.0);
+        }
 
         /// dir must be normalized
         fn ray_intersect_aabb(origin: math.vec3, dir: math.vec3, aabb: Dim3D) bool {
-            // sanity check to ensure the ray is normalized in debug mode
-            std.debug.assert(@abs(dir.lengthSq()) - 1.0 <= std.math.floatEps(f32));
-
-            const inv_dir = math.vec3.one().sub(dir);
+            const inv_dir = math.vec3.one().div(dir);
 
             const min = aabb.position;
             const max = aabb.position.add(aabb.size);
