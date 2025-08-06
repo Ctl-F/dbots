@@ -1,5 +1,6 @@
 const std = @import("std");
 const math = @import("math.zig");
+const host = @import("host.zig");
 
 pub const SparseKey = usize;
 
@@ -149,6 +150,8 @@ pub fn SparseSet(comptime T: type) type {
 pub const Dim3D = struct {
     position: math.vec3,
     size: math.vec3,
+
+    pub fn debug_render(this: Dim3D, renderPass: *host.Pipeline.RenderPass, color: math.vec3) void {}
 
     pub inline fn overlaps(this: Dim3D, other: Dim3D) bool {
         const this_pos2 = this.position.add(this.size);

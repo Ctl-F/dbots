@@ -102,7 +102,10 @@ pub fn main() !void {
         .fragment_shader = scene.get(assets.Shader, "basic_frag") orelse unreachable,
         .topology = .TriangleList,
         .vertex_format = format,
-        .enable_depth_buffer = true,
+        .depth_config = .{
+            .test_enable = true,
+            .write_enable = true,
+        },
         .enable_culling = false,
     };
     const pipeline = try host.Pipeline.init(pipelineInfo);
@@ -166,6 +169,8 @@ pub fn main() !void {
         try scene.claim_copy_result(host.GPUBuffer, copyPass, "cube_mesh");
         copyPass.claim_ownership_of_results();
     }
+    try host.init_debug_pipeline(&scene);
+    defer host.deinit_debug_pipeline(&scene);
 
     // we don't need to release the texture anymore becauser it's now owned by the scene.
     //const texture = scene.get(host.GPUTexture, "gpu_dragon_eye") orelse unreachable;
@@ -190,11 +195,16 @@ pub fn main() !void {
         .model = math.mat4.identity(),
     };
 
+    host.set_debug_projection(transform.projection);
+
     host.input_mode(.Keyboard);
     var input = host.input();
 
     var ui = try UI.init(@floatFromInt(options.display.width), @floatFromInt(options.display.height), 0.01, 100.0, &scene, "main_font", .English);
+
     try ui.debug_render_string_fmt(null, 0, 0, null, "FrameTime: {} - Pitch: {}", .{ 0, 0 });
+    try ui.debug_render_string_fmt(null, 0, 0, null, "X/Y/Z: {}/{}/{}", .{ 0, 0, 0 });
+
     //***TEMPORARY***
     try ui.language_pack.gen_textures();
 
@@ -204,7 +214,7 @@ pub fn main() !void {
 
     app: while (!input.should_close()) {
         input.process_events();
-        const dt = timer.delta();
+        const dt = timer.delta(f32);
         {
             const move_axis = input.axis();
 
@@ -213,7 +223,7 @@ pub fn main() !void {
             const flat_move = math.vec3.new(world_move.x(), 0, world_move.z());
 
             if (flat_move.lengthSq() > std.math.floatEps(f32)) {
-                const move_vector = flat_move.norm().scale(0.1);
+                const move_vector = flat_move.norm().scale(10.0).scale(dt);
                 camera.position = camera.position.add(move_vector);
             }
 
@@ -247,6 +257,7 @@ pub fn main() !void {
             camera.angle = camera.angle.norm();
 
             transform.view = camera.get_view();
+            host.set_debug_view(transform.view);
         }
 
         if (input.action_just_pressed(.Pause)) {
@@ -263,18 +274,27 @@ pub fn main() !void {
         try pipeline.bind_texture(&renderPass, textures[index]);
         pipeline.bind_vertex_buffer(&renderPass, gpuBuffer);
 
-        transform.model = transform.model.scale(math.vec3.set(10));
-        pipeline.bind_uniform_buffer(renderPass, &transform, @sizeOf(UniformTransform), .Vertex, 0);
-        try pipeline.bind_texture(&renderPass, textures[1]);
-        pipeline.bind_vertex_buffer(&renderPass, cube);
-
-        //try ui.begin_ui_pass(renderPass);
+        _ = cube;
+        // transform.model = transform.model.scale(math.vec3.set(10));
+        // pipeline.bind_uniform_buffer(renderPass, &transform, @sizeOf(UniformTransform), .Vertex, 0);
+        // try pipeline.bind_texture(&renderPass, textures[1]);
+        // pipeline.bind_vertex_buffer(&renderPass, cube);
 
         try pipeline.end(&renderPass);
 
-        var uirp = try ui.pipeline.begin(.{ .colorOp = .Load, .depthOp = null }, renderPass);
+        var dbrp = try host.debug_pipeline_begin(renderPass);
+
+        try host.debug_pipeline_add(&dbrp, @splat(0), @splat(10), .{ 0.0, 1.0, 0.0 });
+        try host.debug_pipeline_present(&dbrp);
+
+        //try ui.begin_ui_pass(renderPass);
+
+        //try pipeline.end(&renderPass);
+
+        var uirp = try ui.pipeline.begin(.{ .colorOp = .Load, .depthOp = null }, dbrp);
 
         try ui.debug_render_string_fmt(&uirp, 0, 0, math.vec4.one(), "FrameTime: {} - Pitch: {}", .{ dt, camera.pitch });
+        try ui.debug_render_string_fmt(&uirp, 0, 20, math.vec4.one(), "X/Y/Z: {}/{}/{}", .{ camera.position.x(), camera.position.y(), camera.position.z() });
 
         try ui.pipeline.end(&uirp);
     }

@@ -248,7 +248,7 @@ pub const VertexElement = enum(u32) {
 
 var __DebugPipeline: ?Pipeline = null;
 var __DebugFmt: ?VertexFormat = null;
-var __DebugCube: []u8 = "__DebugWireframeCube__";
+const __DebugCube = "__DebugWireframeCube__";
 var __DebugProjection = math.mat4.identity();
 var __DebugView = math.mat4.identity();
 var __DebugCubeHandle: ?GPUBuffer = null;
@@ -262,49 +262,81 @@ pub fn set_debug_projection(projection: math.mat4) void {
 }
 
 pub fn init_debug_pipeline(scene: *assets.SceneResources) !void {
+    std.debug.assert(assets.Default.loaded());
+
     __DebugFmt = VertexFormat.begin();
     try __DebugFmt.?.add(.Float3);
-    try __DebugFmt.?.Add(.Float3);
+    try __DebugFmt.?.add(.Float3);
 
     const pipelineInfo = PipelineConfig{
         .vertex_shader = scene.get(assets.Shader, assets.Default.DebugShaderVertex).?,
         .fragment_shader = scene.get(assets.Shader, assets.Default.DebugShaderFragment).?,
-        .topology = .LineList,
+        .topology = .TriangleList,
         .vertex_format = __DebugFmt.?,
         .enable_culling = false,
         .blend_mode = .Disabled,
+        .depth_config = null,
+        // .depth_config = .{
+        //     .write_enable = true,
+        //     .test_enable = true,
+        //     .op = .GreaterOrEqual,
+        //     .bias_enable = true,
+        //     .bias_constant = 0.0001,
+        // },
+        .fill_mode = .Line,
     };
     __DebugPipeline = try Pipeline.init(pipelineInfo);
     errdefer __DebugPipeline.?.free();
 
-    // wireframe cube from (0,0,0) to (1,1,1) with color3(white)
+    // debug cube from (0,0,0) to (1,1,1) with color3(white)
     const DebugCube = [_]f32{
-        0.0, 0.0, 0.0, 1.0, 1.0, 1.0,
-        1.0, 0.0, 0.0, 1.0, 1.0, 1.0,
-        1.0, 0.0, 0.0, 1.0, 1.0, 1.0,
-        1.0, 1.0, 0.0, 1.0, 1.0, 1.0,
-        1.0, 1.0, 0.0, 1.0, 1.0, 1.0,
-        0.0, 1.0, 0.0, 1.0, 1.0, 1.0,
-        0.0, 1.0, 0.0, 1.0, 1.0, 1.0,
-        0.0, 0.0, 0.0, 1.0, 1.0, 1.0,
+        // Front face (Z+)
+        0, 0, 1, 1, 1, 1,
+        1, 0, 1, 1, 1, 1,
+        1, 1, 1, 1, 1, 1,
+        0, 0, 1, 1, 1, 1,
+        1, 1, 1, 1, 1, 1,
+        0, 1, 1, 1, 1, 1,
 
-        0.0, 0.0, 1.0, 1.0, 1.0, 1.0,
-        1.0, 0.0, 1.0, 1.0, 1.0, 1.0,
-        1.0, 0.0, 1.0, 1.0, 1.0, 1.0,
-        1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
-        1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
-        0.0, 1.0, 1.0, 1.0, 1.0, 1.0,
-        0.0, 1.0, 1.0, 1.0, 1.0, 1.0,
-        0.0, 0.0, 1.0, 1.0, 1.0, 1.0,
+        // Back face (Z-)
+        1, 0, 0, 1, 1, 1,
+        0, 0, 0, 1, 1, 1,
+        0, 1, 0, 1, 1, 1,
+        1, 0, 0, 1, 1, 1,
+        0, 1, 0, 1, 1, 1,
+        1, 1, 0, 1, 1, 1,
 
-        0.0, 0.0, 0.0, 1.0, 1.0, 1.0,
-        0.0, 0.0, 1.0, 1.0, 1.0, 1.0,
-        1.0, 0.0, 0.0, 1.0, 1.0, 1.0,
-        1.0, 0.0, 1.0, 1.0, 1.0, 1.0,
-        1.0, 1.0, 0.0, 1.0, 1.0, 1.0,
-        1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
-        0.0, 1.0, 0.0, 1.0, 1.0, 1.0,
-        0.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+        // Left face (X-)
+        0, 0, 0, 1, 1, 1,
+        0, 0, 1, 1, 1, 1,
+        0, 1, 1, 1, 1, 1,
+        0, 0, 0, 1, 1, 1,
+        0, 1, 1, 1, 1, 1,
+        0, 1, 0, 1, 1, 1,
+
+        // Right face (X+)
+        1, 0, 1, 1, 1, 1,
+        1, 0, 0, 1, 1, 1,
+        1, 1, 0, 1, 1, 1,
+        1, 0, 1, 1, 1, 1,
+        1, 1, 0, 1, 1, 1,
+        1, 1, 1, 1, 1, 1,
+
+        // Top face (Y+)
+        0, 1, 1, 1, 1, 1,
+        1, 1, 1, 1, 1, 1,
+        1, 1, 0, 1, 1, 1,
+        0, 1, 1, 1, 1, 1,
+        1, 1, 0, 1, 1, 1,
+        0, 1, 0, 1, 1, 1,
+
+        // Bottom face (Y-)
+        0, 0, 0, 1, 1, 1,
+        1, 0, 0, 1, 1, 1,
+        1, 0, 1, 1, 1, 1,
+        0, 0, 0, 1, 1, 1,
+        1, 0, 1, 1, 1, 1,
+        0, 0, 1, 1, 1, 1,
     };
 
     const bufferInfo = BufferCreateInfo{
@@ -322,7 +354,8 @@ pub fn init_debug_pipeline(scene: *assets.SceneResources) !void {
     var copyPass = CopyPass.init(MemAlloc);
     defer copyPass.deinit();
 
-    try copyPass.add_stage_buffer(stageInfo, __DebugCube);
+    const tag = try copyPass.new_tag(__DebugCube);
+    try copyPass.add_stage_buffer(stageInfo, tag);
     try copyPass.submit();
 
     try scene.claim_copy_result(GPUBuffer, copyPass, __DebugCube);
@@ -331,11 +364,11 @@ pub fn init_debug_pipeline(scene: *assets.SceneResources) !void {
     __DebugCubeHandle = scene.get(GPUBuffer, __DebugCube);
 }
 
-pub fn debug_pipeline_begin(renderPass: *Pipeline.RenderPass) !void {
-    if (__DebugPipeline) |*pipeline| {
-        try pipeline.begin(.{ .colorOp = .Load, .depthOp = .Load }, renderPass);
+pub fn debug_pipeline_begin(renderPass: Pipeline.RenderPass) !Pipeline.RenderPass {
+    if (__DebugPipeline) |pipeline| {
+        return try pipeline.begin(.{ .colorOp = .Load, .depthOp = .Load }, renderPass);
     } else {
-        std.debug.print("DebugPipeline not initialized\n", .{});
+        std.debug.print("Debug Pipeline not initialized\n", .{});
         unreachable;
     }
 }
@@ -344,8 +377,12 @@ pub fn debug_pipeline_add(renderPass: *Pipeline.RenderPass, position: @Vector(3,
     if (__DebugPipeline) |*pipeline| {
         if (__DebugCubeHandle == null) return error.DebugCubeNotAvailable;
 
-        const uniform_color: extern struct { color: [3]f32 } = .{ .color = color };
-        const transform = math.mat4.translate(math.vec3.fromSlice(&position), math.mat4.fromScale(size[0], size[1], size[2]));
+        const uniform_color: extern struct { color: [4]f32 } = .{ .color = .{ color[0], color[1], color[2], 1.0 } };
+        const transform =
+            math.mat4.mul(
+                math.mat4.fromScale(math.vec3.new(size[0], size[1], size[2])),
+                math.mat4.fromTranslate(math.vec3.new(position[0], position[1], position[2])),
+            );
 
         const uniform_transform: extern struct { projection: math.mat4, view: math.mat4, model: math.mat4 } = .{
             .projection = __DebugProjection,
@@ -353,8 +390,8 @@ pub fn debug_pipeline_add(renderPass: *Pipeline.RenderPass, position: @Vector(3,
             .model = transform,
         };
 
-        pipeline.bind_uniform_buffer(renderPass, &uniform_transform, @sizeOf(@TypeOf(uniform_transform)), .Vertex, 0);
-        pipeline.bind_uniform_buffer(renderPass, &uniform_color, @sizeOf(@TypeOf(uniform_color)), .Fragment, 0);
+        pipeline.bind_uniform_buffer(renderPass.*, &uniform_transform, @sizeOf(@TypeOf(uniform_transform)), .Vertex, 0);
+        pipeline.bind_uniform_buffer(renderPass.*, &uniform_color, @sizeOf(@TypeOf(uniform_color)), .Fragment, 0);
         pipeline.bind_vertex_buffer(renderPass, __DebugCubeHandle.?);
     } else {
         unreachable;
@@ -502,14 +539,50 @@ pub const BlendMode = enum {
     }
 };
 
+pub const FillMode = enum {
+    Fill,
+    Line,
+
+    fn convert(this: @This()) c_uint {
+        return switch (this) {
+            .Fill => sdl.SDL_GPU_FILLMODE_FILL,
+            .Line => sdl.SDL_GPU_FILLMODE_LINE,
+        };
+    }
+};
+
 pub const PipelineConfig = struct {
     vertex_shader: assets.Shader,
     fragment_shader: assets.Shader,
     topology: Topology,
     vertex_format: VertexFormat,
-    enable_depth_buffer: bool,
+    depth_config: ?DepthConfig,
     enable_culling: bool,
     blend_mode: BlendMode = .Disabled,
+    fill_mode: FillMode = .Fill,
+};
+
+pub const DepthConfig = struct {
+    write_enable: bool,
+    test_enable: bool,
+    op: CompareOp = .Greater,
+    mask: u8 = 0xFF,
+    bias_enable: bool = false,
+    bias_clamp: f32 = 0,
+    bias_constant: f32 = 0,
+    bias_slope: f32 = 0,
+
+    pub const CompareOp = enum {
+        Greater, // because of projection matrix type we use greater not lesser
+        GreaterOrEqual,
+
+        fn convert(this: @This()) c_uint {
+            return switch (this) {
+                .Greater => sdl.SDL_GPU_COMPAREOP_GREATER,
+                .GreaterOrEqual => sdl.SDL_GPU_COMPAREOP_GREATER_OR_EQUAL,
+            };
+        }
+    };
 };
 // vulkan minimum number of textures per shader. Increase at your own risk
 pub const MAX_RENDERPASS_TEXTURE_COUNT = 16;
@@ -563,32 +636,43 @@ pub const Pipeline = struct {
                     .blend_state = config.blend_mode.get_blend_state(),
                 },
                 .num_color_targets = 1,
-                .has_depth_stencil_target = config.enable_depth_buffer,
+                .has_depth_stencil_target = config.depth_config != null,
             },
         };
+
+        const bias_const, const bias_slope, const bias_clamp, const bias_enable =
+            if (config.depth_config) |dconf| .{ dconf.bias_constant, dconf.bias_slope, dconf.bias_clamp, dconf.bias_enable } else .{ 0, 0, 0, false };
 
         if (config.enable_culling) {
             pipeline_info.rasterizer_state = sdl.SDL_GPURasterizerState{
                 .cull_mode = sdl.SDL_GPU_CULLMODE_BACK,
-                .fill_mode = sdl.SDL_GPU_FILLMODE_FILL,
+                .fill_mode = config.fill_mode.convert(),
                 .front_face = sdl.SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE,
+                .enable_depth_bias = bias_enable,
+                .depth_bias_clamp = bias_clamp,
+                .depth_bias_constant_factor = bias_const,
+                .depth_bias_slope_factor = bias_slope,
             };
         } else {
             pipeline_info.rasterizer_state = sdl.SDL_GPURasterizerState{
                 .cull_mode = sdl.SDL_GPU_CULLMODE_NONE,
-                .fill_mode = sdl.SDL_GPU_FILLMODE_FILL,
+                .fill_mode = config.fill_mode.convert(),
                 .front_face = sdl.SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE,
+                .enable_depth_bias = bias_enable,
+                .depth_bias_clamp = bias_clamp,
+                .depth_bias_constant_factor = bias_const,
+                .depth_bias_slope_factor = bias_slope,
             };
         }
 
-        const depth_tex: ?*sdl.SDL_GPUTexture = if (config.enable_depth_buffer) TEXTURE: {
+        const depth_tex: ?*sdl.SDL_GPUTexture = if (config.depth_config) |depthInfo| TEXTURE: {
             pipeline_info.target_info.depth_stencil_format = DEPTH_TEXTURE_FMT;
             pipeline_info.depth_stencil_state = sdl.SDL_GPUDepthStencilState{
-                .enable_depth_test = true,
-                .enable_depth_write = true,
+                .enable_depth_test = depthInfo.test_enable,
+                .enable_depth_write = depthInfo.write_enable,
                 .enable_stencil_test = false,
-                .compare_op = sdl.SDL_GPU_COMPAREOP_GREATER, // because of projection matrix this is greater not less
-                .write_mask = 0xFF,
+                .compare_op = depthInfo.op.convert(),
+                .write_mask = depthInfo.mask,
             };
 
             var width: c_int = undefined;

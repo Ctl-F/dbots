@@ -238,6 +238,8 @@ pub const RawBuffer = struct {
     buffer: []u8,
 };
 
+var __DebugLoaded: bool = false;
+
 pub const Default = struct {
     pub const Quad = "_DefaultQuad_";
     pub const CheckerBoard = "_DefaultCheckerBoardTex_";
@@ -245,6 +247,10 @@ pub const Default = struct {
     pub const TextFragmentShader = "_DefaultShaderTextFragment_";
     pub const DebugShaderVertex = "_DefaultDebugShaderVertex_";
     pub const DebugShaderFragment = "_DefaultDebugShaderFragment_";
+
+    pub inline fn loaded() bool {
+        return __DebugLoaded;
+    }
 
     pub fn make_default(scene: *SceneResources) !void {
         // resources that don't need explicit copy should be added
@@ -290,7 +296,7 @@ pub const Default = struct {
                             .sampler_count = 0,
                             .storage_buffer_count = 0,
                             .storage_texture_count = 0,
-                            .uniform_buffer_count = 0,
+                            .uniform_buffer_count = 1,
                         },
                     },
                 },
@@ -299,12 +305,14 @@ pub const Default = struct {
                 .asset_name = DebugShaderFragment,
                 .asset_source = "shaders/debug.frag.spv",
                 .type = .{
-                    .stage = .Fragment,
-                    .resources = .{
-                        .sampler_count = 0,
-                        .storage_buffer_count = 0,
-                        .storage_texture_count = 0,
-                        .uniform_buffer_count = 0,
+                    .shader = .{
+                        .stage = .Fragment,
+                        .resources = .{
+                            .sampler_count = 0,
+                            .storage_buffer_count = 0,
+                            .storage_texture_count = 0,
+                            .uniform_buffer_count = 1,
+                        },
                     },
                 },
             },
@@ -331,6 +339,8 @@ pub const Default = struct {
 
         // this is important so that we don't accidentally drop results we didn't mean to.
         copyPass.claim_ownership_of_results();
+
+        __DebugLoaded = true;
     }
 
     fn make_default_quad(copyPass: *host.CopyPass) !host.CopyPass.tag_t {
