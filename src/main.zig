@@ -5,6 +5,7 @@ const math = @import("math.zig");
 const UI = @import("ui.zig");
 const Camera = @import("camera.zig");
 const Time = @import("timing.zig");
+const containers = @import("containers.zig");
 
 const UniformColor = extern struct {
     color: [4]f32,
@@ -15,6 +16,11 @@ const UniformTransform = extern struct {
     view: math.mat4,
     model: math.mat4,
 };
+
+fn dummy_interface(i: *usize) containers.Dim3D {
+    _ = i;
+    return containers.Dim3D{ .position = .{ .data = .{ 0, 0, 0 } }, .size = .{ .data = .{ 1, 1, 1 } } };
+}
 
 pub fn main() !void {
     const options = host.InitOptions{
@@ -111,6 +117,12 @@ pub fn main() !void {
     const pipeline = try host.Pipeline.init(pipelineInfo);
     defer pipeline.free();
 
+    var scene_bounds = containers.FixedSpatialTree(usize, dummy_interface, 8).init(host.MemAlloc, .{
+        .position = .{ .data = .{ -100, -3, -100 } },
+        .size = .{ .data = .{ 200, 100, 200 } },
+    });
+    defer scene_bounds.deinit();
+
     try scene.build_default_assets();
     {
         var copyPass = host.CopyPass.init(host.MemAlloc);
@@ -181,7 +193,7 @@ pub fn main() !void {
     };
 
     const gpuBuffer = scene.get(host.GPUBuffer, "floor") orelse unreachable;
-    const cube = scene.get(host.GPUBuffer, "cube_mesh") orelse unreachable;
+    //const cube = scene.get(host.GPUBuffer, "cube_mesh") orelse unreachable;
 
     scene.free_resource("basic_vert");
     scene.free_resource("basic_frag");
@@ -223,15 +235,9 @@ pub fn main() !void {
             const flat_move = math.vec3.new(world_move.x(), 0, world_move.z());
 
             if (flat_move.lengthSq() > std.math.floatEps(f32)) {
-                const move_vector = flat_move.norm().scale(10.0).scale(dt);
+                const move_vector = flat_move.norm().scale(50.0).scale(dt);
                 camera.position = camera.position.add(move_vector);
             }
-
-            // const forward = camera.angle.rotateVec(math.vec3.new(move_axis[0], 0, move_axis[1]));
-            // const move_vector = math.vec3.new(forward.x(), 0, forward.z()).norm().scale(0.1); // correct scale TODO: Timers and DeltaTime
-            // if (@abs(move_vector.lengthSq()) > std.math.floatEps(f32)) {
-            //     camera.position = camera.position.add(move_vector);
-            // }
         }
 
         {
@@ -274,22 +280,13 @@ pub fn main() !void {
         try pipeline.bind_texture(&renderPass, textures[index]);
         pipeline.bind_vertex_buffer(&renderPass, gpuBuffer);
 
-        _ = cube;
-        // transform.model = transform.model.scale(math.vec3.set(10));
-        // pipeline.bind_uniform_buffer(renderPass, &transform, @sizeOf(UniformTransform), .Vertex, 0);
-        // try pipeline.bind_texture(&renderPass, textures[1]);
-        // pipeline.bind_vertex_buffer(&renderPass, cube);
-
         try pipeline.end(&renderPass);
 
         var dbrp = try host.debug_pipeline_begin(renderPass);
 
-        try host.debug_pipeline_add(&dbrp, @splat(0), @splat(10), .{ 0.0, 1.0, 0.0 });
+        try scene_bounds.debug_draw(&dbrp);
+
         try host.debug_pipeline_present(&dbrp);
-
-        //try ui.begin_ui_pass(renderPass);
-
-        //try pipeline.end(&renderPass);
 
         var uirp = try ui.pipeline.begin(.{ .colorOp = .Load, .depthOp = null }, dbrp);
 
@@ -299,9 +296,8 @@ pub fn main() !void {
         try ui.pipeline.end(&uirp);
     }
 }
-// TODO: Scene
-// TODO: Test Camera (formaize camera)
-// TODO: multi-thread asset loading
+
 // TODO: Sound asset type
 // TODO: Level Layout asset type
 // TODO: Collisions
+// TODO: Test spatial tree

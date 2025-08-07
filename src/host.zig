@@ -380,8 +380,8 @@ pub fn debug_pipeline_add(renderPass: *Pipeline.RenderPass, position: @Vector(3,
         const uniform_color: extern struct { color: [4]f32 } = .{ .color = .{ color[0], color[1], color[2], 1.0 } };
         const transform =
             math.mat4.mul(
-                math.mat4.fromScale(math.vec3.new(size[0], size[1], size[2])),
                 math.mat4.fromTranslate(math.vec3.new(position[0], position[1], position[2])),
+                math.mat4.fromScale(math.vec3.new(size[0], size[1], size[2])),
             );
 
         const uniform_transform: extern struct { projection: math.mat4, view: math.mat4, model: math.mat4 } = .{
@@ -397,11 +397,6 @@ pub fn debug_pipeline_add(renderPass: *Pipeline.RenderPass, position: @Vector(3,
         unreachable;
     }
 }
-
-//TODO: debug shader
-// TODO: Test
-// TODO: Implement debug draw on spatial tree for partions
-// TODO: Test spatial tree
 
 pub fn debug_pipeline_present(renderPass: *Pipeline.RenderPass) !void {
     if (__DebugPipeline) |*pipeline| {

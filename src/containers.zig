@@ -9,6 +9,14 @@ pub fn SparseSet(comptime T: type) type {
         const This = @This();
 
         pub const Key = SparseKey;
+        pub const Ref = struct {
+            parent: *SparseSet(T),
+            key: Key,
+
+            pub fn get(this: @This()) *T {
+                return this.parent.get_ptr(this.key).?;
+            }
+        };
 
         sparse: std.ArrayList(?usize), // holds index of item in dense array
         holes: std.ArrayList(usize), // stack of empty sparse slots to avoid a linear search
@@ -25,7 +33,7 @@ pub fn SparseSet(comptime T: type) type {
             };
         }
 
-        pub fn initCapacity(allocator: std.mem.Allocator, capacity: usize) !This {
+        pub fn init_capacity(allocator: std.mem.Allocator, capacity: usize) !This {
             return This{
                 .sparse = try std.ArrayList(?usize).initCapacity(allocator, capacity),
                 .holes = try std.ArrayList(usize).initCapacity(allocator, capacity),
@@ -75,6 +83,13 @@ pub fn SparseSet(comptime T: type) type {
             std.debug.assert(dense_index < this.dense.items.len);
 
             return &this.dense.items[dense_index];
+        }
+
+        pub fn to_ref(this: *This, index: Key) !Ref {
+            if (this.contains(index)) {
+                return Ref{ .parent = this, .key = index };
+            }
+            return error.InvalidKey;
         }
 
         pub inline fn contains(this: This, index: Key) bool {
@@ -151,7 +166,9 @@ pub const Dim3D = struct {
     position: math.vec3,
     size: math.vec3,
 
-    pub fn debug_render(this: Dim3D, renderPass: *host.Pipeline.RenderPass, color: math.vec3) void {}
+    pub fn debug_render(this: Dim3D, renderPass: *host.Pipeline.RenderPass, color: math.vec3) !void {
+        try host.debug_pipeline_add(renderPass, this.position.data, this.size.data, color.data);
+    }
 
     pub inline fn overlaps(this: Dim3D, other: Dim3D) bool {
         const this_pos2 = this.position.add(this.size);
@@ -180,7 +197,18 @@ pub const Dim3D = struct {
     }
 };
 
-pub fn FixedSpatialTree(comptime T: type, comptime interface: *fn (*T) Dim3D, comptime nest_limit: usize) type {
+const __DebugColors = [_]math.vec3{
+    .{ .data = .{ 1, 1, 1 } },
+    .{ .data = .{ 1, 0, 0 } },
+    .{ .data = .{ 0, 1, 0 } },
+    .{ .data = .{ 0, 0, 1 } },
+    .{ .data = .{ 1, 0, 1 } },
+    .{ .data = .{ 1, 1, 0 } },
+    .{ .data = .{ 0, 1, 1 } },
+    .{ .data = .{ 1, 0, 1 } },
+};
+
+pub fn FixedSpatialTree(comptime T: type, comptime interface: *const fn (*const T) Dim3D, comptime nest_limit: usize) type {
     return struct {
         const This = @This();
 
@@ -197,7 +225,65 @@ pub fn FixedSpatialTree(comptime T: type, comptime interface: *fn (*T) Dim3D, co
         };
 
         instances: SparseSet(T),
-        buckets: [@exp2(nest_limit) - 1]Bucket = undefined,
+        buckets: [(std.math.powi(usize, 2, nest_limit) catch unreachable) - 1]Bucket = undefined,
+
+        pub fn debug_draw(this: This, renderPass: *host.Pipeline.RenderPass) !void {
+            var idx: usize = 0;
+            for (this.buckets) |bucket| {
+                try bucket.field.debug_render(renderPass, __DebugColors[idx]);
+                idx = (idx + 1) % __DebugColors.len;
+            }
+        }
+
+        pub fn debug_display(this: This, writer: anytype) void {
+            write_bucket_json(writer, &this.buckets, 0, 0) catch return;
+        }
+
+        fn write_bucket_json(writer: anytype, buckets: []const Bucket, index: usize, depth: usize) !void {
+            if (index >= buckets.len) {
+                try writer.writeAll("null");
+                return;
+            }
+
+            const indent = struct {
+                pub fn write(w: anytype, d: usize) !void {
+                    try w.writeByteNTimes(' ', d * 4);
+                }
+            };
+
+            const bucket = buckets[index];
+            try writer.writeAll("{\n");
+
+            try indent.write(writer, depth + 1);
+            try writer.writeAll("\"position\": ");
+            try write_vec3_json(writer, bucket.field.position);
+            try writer.writeAll(",\n");
+
+            try indent.write(writer, depth + 1);
+            try writer.writeAll("\"size\": ");
+            try write_vec3_json(writer, bucket.field.size);
+            try writer.writeAll(",\n");
+
+            const left_index = 2 * index + 1;
+            const right_index = 2 * index + 2;
+
+            try indent.write(writer, depth + 1);
+            try writer.writeAll("\"left\": ");
+            try write_bucket_json(writer, buckets, left_index, depth + 1);
+            try writer.writeAll(",\n");
+
+            try indent.write(writer, depth + 1);
+            try writer.writeAll("\"right\": ");
+            try write_bucket_json(writer, buckets, right_index, depth + 1);
+            try writer.writeAll("\n");
+
+            try indent.write(writer, depth);
+            try writer.writeAll("}");
+        }
+
+        fn write_vec3_json(writer: anytype, vec: math.vec3) !void {
+            try writer.print("[{d:.2}, {d:.2}, {d:.2}]", .{ vec.x(), vec.y(), vec.z() });
+        }
 
         pub fn init(allocator: std.mem.Allocator, area: Dim3D) This {
             var this = This{
@@ -209,9 +295,32 @@ pub fn FixedSpatialTree(comptime T: type, comptime interface: *fn (*T) Dim3D, co
                 .field = area,
                 .instances = std.AutoHashMap(usize, bool).init(allocator),
             };
-            this.compute_children(0, 0);
+            this.compute_children(0, 0) catch unreachable;
 
             return this;
+        }
+
+        pub fn init_capacity(allocator: std.mem.Allocator, area: Dim3D, capacity: usize) !This {
+            var this = This{
+                .instances = try SparseSet(T).init_capacity(allocator, capacity),
+                .buckets = undefined,
+            };
+
+            this.buckets[0] = Bucket{
+                .field = area,
+                .instances = std.AutoHashMap(usize, bool).init(allocator),
+            };
+
+            this.compute_children(0, 0) catch unreachable;
+
+            return this;
+        }
+
+        pub fn deinit(this: *This) void {
+            for (&this.buckets) |*bucket| {
+                bucket.instances.deinit();
+            }
+            this.instances.deinit();
         }
 
         fn compute_children(this: *This, index: usize, iteration: usize) !void {
