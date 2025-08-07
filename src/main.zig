@@ -17,7 +17,7 @@ const UniformTransform = extern struct {
     model: math.mat4,
 };
 
-fn dummy_interface(i: *usize) containers.Dim3D {
+fn dummy_interface(i: *const usize) containers.Dim3D {
     _ = i;
     return containers.Dim3D{ .position = .{ .data = .{ 0, 0, 0 } }, .size = .{ .data = .{ 1, 1, 1 } } };
 }

@@ -4,6 +4,8 @@ const host = @import("host.zig");
 
 pub const SparseKey = usize;
 
+pub usingnamespace @import("fixed_list.zig");
+
 pub fn SparseSet(comptime T: type) type {
     return struct {
         const This = @This();
@@ -40,6 +42,13 @@ pub fn SparseSet(comptime T: type) type {
                 .dense = try std.ArrayList(T).initCapacity(allocator, capacity),
                 .back_map = try std.ArrayList(usize).initCapacity(allocator, capacity),
             };
+        }
+
+        pub fn clear(this: *This) void {
+            this.sparse.clearRetainingCapacity();
+            this.dense.clearRetainingCapacity();
+            this.holes.clearRetainingCapacity();
+            this.back_map.clearRetainingCapacity();
         }
 
         pub fn deinit(this: *This) void {
@@ -103,6 +112,10 @@ pub fn SparseSet(comptime T: type) type {
                 }
             }
             return null;
+        }
+
+        pub inline fn sparse_from_dense(this: This, dense: usize) Key {
+            return this.back_map.items[dense];
         }
 
         pub fn remove(this: *This, index: Key) void {
@@ -386,7 +399,7 @@ pub fn FixedSpatialTree(comptime T: type, comptime interface: *const fn (*const 
             const bbox = interface(&instance);
 
             const bucket = this.find_bucket(0, bbox);
-            try bucket.instances.put(key, 1);
+            try bucket.instances.put(key, true);
 
             return key;
         }
@@ -405,13 +418,69 @@ pub fn FixedSpatialTree(comptime T: type, comptime interface: *const fn (*const 
             this.instances.remove(key);
         }
 
-        pub fn find(this: This, results: []?*T, area: Dim3D) usize {
+        pub fn remove_by_key(this: *This, key: SparseKey) void {
+            const instance = this.instances.get(key) orelse return;
+
+            const bbox = interface(&instance);
+            var bucket = this.find_bucket(0, bbox);
+
+            std.debug.assert(bucket.instances.contains(key));
+
+            bucket.instances.remove(key);
+            this.instances.remove(key);
+        }
+
+        pub fn erase(this: *This, area: Dim3D) void {
+            this.erase_in_bucket(0, area);
+        }
+
+        pub fn find(this: This, results: []?SparseSet(T).Ref, area: Dim3D) usize {
             return this.find_in_bucket(results, area, 0);
+        }
+
+        pub fn update(this: *This, instance: SparseKey, old_bbox: Dim3D) !void {
+            std.debug.assert(this.instances.contains(instance));
+
+            const new_bbox = interface(this.instances.get_ptr(instance));
+
+            var old_bucket = this.find_bucket(0, old_bbox);
+            var new_bucket = this.find_bucket(0, new_bbox);
+
+            std.debug.assert(old_bucket.instances.contains(instance));
+
+            if (old_bucket == new_bucket) return;
+
+            try new_bucket.instances.put(instance, true);
+            old_bucket.instances.remove(instance);
+        }
+
+        fn erase_in_bucket(this: *This, bucket: usize, area: Dim3D) void {
+            if (bucket >= this.buckets.len) return;
+
+            const this_bucket = this.buckets[bucket];
+
+            if (bucket != 0 and !area.overlaps(this_bucket.field)) {
+                return;
+            }
+
+            var iter = this_bucket.instances.iterator();
+            while (iter.next()) |entry| {
+                const bbox = interface(this.instances.get_ptr(entry.key_ptr.*));
+                if (area.overlaps(bbox)) {
+                    this.remove_by_key(entry.key_ptr.*);
+                }
+            }
+
+            const left = Bucket.left(bucket);
+            const right = Bucket.right(bucket);
+
+            this.erase_in_bucket(left, area);
+            this.erase_in_bucket(right, area);
         }
 
         /// searches the bucket for instances that overlap with area
         /// returns number of instances added to results
-        fn find_in_bucket(this: This, results: []?*T, area: Dim3D, bucket: usize) usize {
+        fn find_in_bucket(this: This, results: []?SparseSet(T).Ref, area: Dim3D, bucket: usize) usize {
             const this_bucket = this.buckets[bucket];
 
             if (results.len == 0) {
@@ -439,7 +508,7 @@ pub fn FixedSpatialTree(comptime T: type, comptime interface: *const fn (*const 
 
                 // possible improvement: @inlineCall(interface, instance)
                 if (area.overlaps(interface(instance))) {
-                    results[index] = instance;
+                    results[index] = this.instances.to_ref(key) catch unreachable;
                     index += 1;
                 }
             }
@@ -568,7 +637,7 @@ pub fn FixedSpatialTree(comptime T: type, comptime interface: *const fn (*const 
             return tmax >= @max(tmin, 0.0);
         }
 
-        fn dump_bucket(this: This, results: []?*T, bucket: usize) usize {
+        fn dump_bucket(this: This, results: []?SparseSet(T).Ref, bucket: usize) usize {
             const this_bucket = this.buckets[bucket];
             var iterator = this_bucket.instances.iterator();
             var index: usize = 0;
@@ -577,7 +646,7 @@ pub fn FixedSpatialTree(comptime T: type, comptime interface: *const fn (*const 
                 if (index >= results.len) return index;
 
                 const key = kv.key_ptr.*;
-                results[index] = this.instances.get_ptr(key).?;
+                results[index] = this.instances.to_ref(key) catch unreachable;
                 index += 1;
             }
 
