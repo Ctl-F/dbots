@@ -85,9 +85,9 @@ pub fn StateMachine(comptime stateUnion: type, comptime contextType: type) type 
             return switch (stateType) {
                 inline else => |t| {
                     const field = @field(This.State, @tagName(t));
-                    if (!@hasDecl(field, "construct")) {
-                        @compileError("Each state must define a construct() method.");
-                    }
+                    if (!@hasDecl(@TypeOf(field), "construct")) {
+                        @compileError("Each state must define a construct() method. " ++ @typeName(@TypeOf(field)) ++ " does not in " ++ @typeName(This.StateType) ++ " and " ++ @typeName(This.State));
+                    } //TODO: Fix state machine
                     return try field.construct(context);
                 },
             };

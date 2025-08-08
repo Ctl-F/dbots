@@ -38,6 +38,10 @@ pub fn init(mode: Mode) This {
     };
 }
 
+pub fn capture_mouse(capture: bool) void {
+    _ = sdl.SDL_SetWindowRelativeMouseMode(host.window(), capture);
+}
+
 pub inline fn should_close(this: This) bool {
     return this.close_condition;
 }
