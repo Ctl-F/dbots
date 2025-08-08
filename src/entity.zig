@@ -100,7 +100,7 @@ pub const GameObject = struct {
     context: *anyopaque,
     vtable: VTable,
 
-    pub fn get_aabb(this: *GameObject) Collider.AABB {
+    pub fn get_aabb(this: *const GameObject) Collider.AABB {
         const body = this.body.get();
 
         return body.collider.get_aabb(body.position);
