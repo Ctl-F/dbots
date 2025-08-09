@@ -24,6 +24,34 @@ var windowptr: ?*sdl.SDL_Window = null;
 var gpu_device: ?*sdl.SDL_GPUDevice = null;
 var _input: ?Input = null;
 
+pub fn viewport(comptime T: type) struct { x: T, y: T, w: T, h: T } {
+    const info = @typeInfo(T);
+
+    var w: c_int = undefined;
+    var h: c_int = undefined;
+    var x: c_int = undefined;
+    var y: c_int = undefined;
+
+    _ = sdl.SDL_GetWindowPosition(windowptr, &x, &y);
+    _ = sdl.SDL_GetWindowSizeInPixels(windowptr, &w, &h);
+
+    return switch (info) {
+        .float => .{
+            .x = @as(T, @floatFromInt(x)),
+            .y = @as(T, @floatFromInt(y)),
+            .w = @as(T, @floatFromInt(w)),
+            .h = @as(T, @floatFromInt(h)),
+        },
+        .int => .{
+            .x = @intCast(x),
+            .y = @intCast(y),
+            .w = @intCast(w),
+            .h = @intCast(h),
+        },
+        else => @compileError("Expected primitive number type."),
+    };
+}
+
 pub fn device() *sdl.SDL_GPUDevice {
     if (gpu_device) |dev| {
         return dev;

@@ -14,7 +14,7 @@ pub const Collider = union(enum) {
     box: AABB,
     sphere: Sphere,
 
-    pub fn get_aabb(this: *@This(), origin: math.vec3) AABB {
+    pub fn get_aabb(this: @This(), origin: math.vec3) AABB {
         switch (this) {
             .box => |b| {
                 return AABB{
@@ -65,7 +65,7 @@ pub const Controller = struct {
         on_scene_prestep: *const fn (scene: *Scene, context: *anyopaque, dt: f32) anyerror!void,
         on_scene_poststep: *const fn (scene: *Scene, context: *anyopaque, dt: f32) anyerror!void,
         on_scene_predraw: *const fn (scene: *Scene, context: *anyopaque) anyerror!void,
-        on_scene_postdraw: *const fn (scene: *Scene, context: *anyopaque) anyerror!void,
+        on_scene_postdraw: *const fn (scene: *Scene, context: *anyopaque, rp: *host.Pipeline.RenderPass) anyerror!void,
     };
 
     pub inline fn scene_load(this: This, scene: *Scene) anyerror!void {
@@ -83,8 +83,8 @@ pub const Controller = struct {
     pub inline fn scene_predraw(this: This, scene: *Scene) anyerror!void {
         return try this.vtable.on_scene_predraw(scene, this.context);
     }
-    pub inline fn scene_postdraw(this: This, scene: *Scene) anyerror!void {
-        return try this.vtable.on_scene_postdraw(scene, this.context);
+    pub inline fn scene_postdraw(this: This, scene: *Scene, renderPass: *host.Pipeline.RenderPass) anyerror!void {
+        return try this.vtable.on_scene_postdraw(scene, this.context, renderPass);
     }
 };
 
@@ -169,7 +169,7 @@ pub const ScenePipeline = struct {
     on_pass_end: ?*const fn (this: *This, scene: *Scene, renderPass: *host.Pipeline.RenderPass) anyerror!void,
 
     // per renderable
-    on_draw: ?*const fn (this: *This, scene: *Scene, renderPass: *host.Pipeline.RenderPass, renderable: RenderableSet.Ref) anyerror!void,
+    on_draw: ?*const fn (this: *This, scene: *Scene, renderPass: *host.Pipeline.RenderPass, renderable: StandardRenderable) anyerror!void,
 
     pub fn init(pipeline: host.Pipeline, load_op: host.Pipeline.RenderPassLoad) !This {
         return This{
@@ -177,7 +177,7 @@ pub const ScenePipeline = struct {
             .renderables = RenderableSet.init(host.MemAlloc),
             .on_pass_begin = null,
             .on_pass_end = null,
-            .on_pre_draw = null,
+            .on_draw = null,
             .load_op = load_op,
         };
     }
@@ -209,7 +209,7 @@ pub const ScenePipeline = struct {
             try end(this, scene, &renderPass);
         }
 
-        this.pipeline.end(&renderPass);
+        try this.pipeline.end(&renderPass);
 
         return renderPass;
     }
@@ -247,7 +247,7 @@ pub const Scene = struct {
         var active_objects = try SpatialTree.init_capacity(host.MemAlloc, boundry, InitialCapacity);
         errdefer active_objects.deinit();
 
-        var inactive_objects = try SpatialTree.init_capacity(host.MemAlloc, InitialCapacity);
+        var inactive_objects = try SpatialTree.init_capacity(host.MemAlloc, boundry, InitialCapacity);
         errdefer inactive_objects.deinit();
 
         var dead_objects = try std.ArrayList(GameObjectSet.Ref).initCapacity(host.MemAlloc, InitialCapacity);
@@ -269,29 +269,21 @@ pub const Scene = struct {
             .physics_bodies = PhysicsBodySet.init(host.MemAlloc),
             .resources = assets.SceneResources.init(host.MemAlloc),
             .controllers = ControllerSet.init(host.MemAlloc),
-            .object_buffer = object_buffer,
-            .pipeline_list = [_]?ScenePipeline{null} ** MAX_PIPELINES,
+            .dirty_buffer = object_buffer,
+            .pipeline_buffer = [_]?ScenePipeline{null} ** MAX_PIPELINES,
         };
     }
 
     pub fn deinit(this: *This) void {
-        for (this.object_buffer.items) |go| {
-            go.destroy(this);
-        }
-
         for (this.active_objects.instances.items()) |*instance| {
             instance.destroy(this);
         }
         for (this.inactive_objects.instances.items()) |*instance| {
             instance.destroy(this);
         }
-        // should be empty but just in case
-        for (this.dead_objects.items) |*instance| {
-            instance.destroy(this);
-        }
 
         for (this.controllers.items()) |*controller| {
-            controller.scene_unload(this);
+            controller.scene_unload(this) catch unreachable;
         }
 
         this.active_objects.deinit();
@@ -303,7 +295,7 @@ pub const Scene = struct {
         this.dirty_buffer.deinit();
 
         var idx: usize = 0;
-        while (&this.pipeline_buffer[idx]) |*pipeline| : (idx += 1) {
+        while (this.pipeline_buffer[idx]) |*pipeline| : (idx += 1) {
             pipeline.deinit();
         }
     }
@@ -312,7 +304,7 @@ pub const Scene = struct {
         for (this.new_objects.items()) |new_obj| {
             const idx = try this.active_objects.insert(new_obj);
             const ref = this.active_objects.instances.get_ptr(idx).?;
-            try ref.create();
+            try ref.create(this);
         }
         this.new_objects.clear();
     }
@@ -340,7 +332,7 @@ pub const Scene = struct {
 
             const end = obj.get_aabb();
 
-            if (start != end) {
+            if (!start.equals(end)) {
                 try this.dirty_buffer.append(.{
                     .old_position = start,
                     .dense_index = dense_idx,
@@ -348,7 +340,7 @@ pub const Scene = struct {
             }
         }
 
-        for (this.physics_bodies) |*body| {
+        for (this.physics_bodies.items()) |*body| {
             body.position = body.position.add(body.velocity.scale(dt));
             //TODO: Default Collision Checking??
         }
@@ -367,8 +359,8 @@ pub const Scene = struct {
 
         // kill dead instances
         for (this.dead_objects.items) |dead| {
-            dead.destroy(this);
-            this.active_objects.remove(dead);
+            dead.get().destroy(this);
+            this.active_objects.remove_by_key(dead.key);
         }
         this.dead_objects.clearRetainingCapacity();
     }
@@ -382,12 +374,14 @@ pub const Scene = struct {
 
         var index: usize = 0;
         var rolloverRenderPass: ?host.Pipeline.RenderPass = null;
-        while (this.pipeline_buffer[index]) |pipeline| : (index += 1) {
+        while (this.pipeline_buffer[index]) |*pipeline| : (index += 1) {
             rolloverRenderPass = try pipeline.draw(this, rolloverRenderPass);
         }
 
-        for (this.controllers.items()) |controller| {
-            try controller.scene_postdraw(this);
+        if (rolloverRenderPass) |*rrp| {
+            for (this.controllers.items()) |controller| {
+                try controller.scene_postdraw(this, rrp);
+            }
         }
     }
 
@@ -445,7 +439,7 @@ pub const Scene = struct {
     pub fn add_pipeline(this: *This, pipeline: ScenePipeline, index: usize) void {
         std.debug.assert(index < this.pipeline_buffer.len);
 
-        inline for (0..(index - 1)) |idx| {
+        for (0..index) |idx| {
             std.debug.assert(this.pipeline_buffer[idx] != null);
         }
 

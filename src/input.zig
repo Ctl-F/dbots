@@ -139,6 +139,7 @@ fn convert_scancode(scancode: c_uint) ?Actions {
         sdl.SDL_BUTTON_LEFT => Actions.Main,
         sdl.SDL_BUTTON_RIGHT => Actions.Secondary,
         sdl.SDL_BUTTON_MIDDLE => Actions.Terciary,
+        sdl.SDL_SCANCODE_RETURN => Actions.Start,
         else => null,
     };
 }
@@ -195,5 +196,6 @@ pub const Actions = enum(usize) {
     TriggerLeft,
     TriggerRight,
     Crouch,
+    Start,
     MAX_INPUT,
 };

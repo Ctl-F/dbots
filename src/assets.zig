@@ -247,6 +247,10 @@ pub const Default = struct {
     pub const TextFragmentShader = "_DefaultShaderTextFragment_";
     pub const DebugShaderVertex = "_DefaultDebugShaderVertex_";
     pub const DebugShaderFragment = "_DefaultDebugShaderFragment_";
+    pub const FontSmall = "__FontSmall__";
+    pub const FontMedium = "__FontMedium__";
+    pub const FontLarge = "__FontLarge__";
+    pub const FontXLarge = "__FontXLarge__";
 
     pub inline fn loaded() bool {
         return __DebugLoaded;
@@ -313,6 +317,42 @@ pub const Default = struct {
                             .storage_texture_count = 0,
                             .uniform_buffer_count = 1,
                         },
+                    },
+                },
+            },
+            .{
+                .asset_name = FontSmall,
+                .asset_source = "fonts/8bitOperatorPlus-Bold.ttf",
+                .type = .{
+                    .font = .{
+                        .size = 10,
+                    },
+                },
+            },
+            .{
+                .asset_name = FontMedium,
+                .asset_source = "fonts/8bitOperatorPlus-Bold.ttf",
+                .type = .{
+                    .font = .{
+                        .size = 14,
+                    },
+                },
+            },
+            .{
+                .asset_name = FontLarge,
+                .asset_source = "fonts/8bitOperatorPlus-Bold.ttf",
+                .type = .{
+                    .font = .{
+                        .size = 18,
+                    },
+                },
+            },
+            .{
+                .asset_name = FontXLarge,
+                .asset_source = "fonts/8bitOperatorPlus-Bold.ttf",
+                .type = .{
+                    .font = .{
+                        .size = 48,
                     },
                 },
             },

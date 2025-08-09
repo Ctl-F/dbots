@@ -129,8 +129,8 @@ pub fn SparseSet(comptime T: type) type {
                 const second_sparse_index = this.back_map.items[last_dense_item];
 
                 // perform a swap
-                std.mem.swap(T, this.dense.items[dense_index_to_remove], this.dense.items[last_dense_item]);
-                std.mem.swap(usize, this.back_map.items[dense_index_to_remove], this.back_map.items[last_dense_item]);
+                std.mem.swap(T, &this.dense.items[dense_index_to_remove], &this.dense.items[last_dense_item]);
+                std.mem.swap(usize, &this.back_map.items[dense_index_to_remove], &this.back_map.items[last_dense_item]);
 
                 // update the pointer to the live item that got moved
                 this.sparse.items[second_sparse_index] = dense_index_to_remove;
@@ -181,6 +181,10 @@ pub const Dim3D = struct {
 
     pub fn debug_render(this: Dim3D, renderPass: *host.Pipeline.RenderPass, color: math.vec3) !void {
         try host.debug_pipeline_add(renderPass, this.position.data, this.size.data, color.data);
+    }
+
+    pub inline fn equals(this: Dim3D, other: Dim3D) bool {
+        return this.position.eql(other.position) and this.size.eql(other.size);
     }
 
     pub inline fn overlaps(this: Dim3D, other: Dim3D) bool {
@@ -406,28 +410,22 @@ pub fn FixedSpatialTree(comptime T: type, comptime interface: *const fn (*const 
 
         pub fn remove(this: *This, instance: T) void {
             const key = this.instances.find_value(instance) orelse return;
-
-            const bbox = interface(&instance);
-            var bucket = this.find_bucket(0, bbox);
-
-            // since we have a KEY then we should also never fail
-            // to find the bucket. Hence the sanity check
-            std.debug.assert(bucket.instances.contains(key));
-
-            bucket.instances.remove(key);
-            this.instances.remove(key);
+            this.remove_kv(key, instance);
         }
 
         pub fn remove_by_key(this: *This, key: SparseKey) void {
             const instance = this.instances.get(key) orelse return;
+            this.remove_kv(key, instance);
+        }
 
+        fn remove_kv(this: *This, key: SparseKey, instance: T) void {
             const bbox = interface(&instance);
             var bucket = this.find_bucket(0, bbox);
 
             std.debug.assert(bucket.instances.contains(key));
 
-            bucket.instances.remove(key);
-            this.instances.remove(key);
+            _ = bucket.instances.remove(key);
+            _ = this.instances.remove(key);
         }
 
         pub fn erase(this: *This, area: Dim3D) void {
@@ -441,17 +439,17 @@ pub fn FixedSpatialTree(comptime T: type, comptime interface: *const fn (*const 
         pub fn update(this: *This, instance: SparseKey, old_bbox: Dim3D) !void {
             std.debug.assert(this.instances.contains(instance));
 
-            const new_bbox = interface(this.instances.get_ptr(instance));
+            const new_bbox = interface(this.instances.get_ptr(instance).?);
 
             var old_bucket = this.find_bucket(0, old_bbox);
             var new_bucket = this.find_bucket(0, new_bbox);
 
             std.debug.assert(old_bucket.instances.contains(instance));
 
-            if (old_bucket == new_bucket) return;
+            if (old_bucket.field.equals(new_bucket.field)) return;
 
             try new_bucket.instances.put(instance, true);
-            old_bucket.instances.remove(instance);
+            _ = old_bucket.instances.remove(instance);
         }
 
         fn erase_in_bucket(this: *This, bucket: usize, area: Dim3D) void {
@@ -673,11 +671,11 @@ pub fn FixedSpatialTree(comptime T: type, comptime interface: *const fn (*const 
             const right = &this.buckets[iright];
 
             if (left.field.contains(dim)) {
-                return this.find_bucket(ileft, dim) orelse &this.buckets[bucket];
+                return this.find_bucket(ileft, dim);
             }
 
             if (right.field.contains(dim)) {
-                return this.find_bucket(iright, dim) orelse &this.buckets[bucket];
+                return this.find_bucket(iright, dim);
             }
 
             return &this.buckets[bucket];
